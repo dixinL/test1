@@ -99,26 +99,14 @@ def generate_rss_html(report_path, rank_csv, width_img, congestion_img, output_p
     top15 = rank_rows[:15]
     bottom5 = rank_rows[-5:] if len(rank_rows) > 5 else []
 
-    # 图片转 base64 或使用相对路径
-    width_img_b64 = None
-    cong_img_b64 = None
+    # 图片使用相对路径（output/ → ../width/  ../congestion/）
+    width_img_rel = None
+    cong_img_rel = None
 
-    def img_to_base64(path):
-        """将图片转为 base64 data URI"""
-        if not path or not os.path.exists(path):
-            return None
-        import base64
-        ext = os.path.splitext(path)[1].lower()
-        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif"}.get(ext, "image/png")
-        with open(path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        return "data:{};base64,{}".format(mime, b64)
-
-    # 图片内嵌到 HTML (方便 RSS 推送，无需外部链接)
-    if width_img:
-        width_img_b64 = img_to_base64(width_img)
-    if congestion_img:
-        cong_img_b64 = img_to_base64(congestion_img)
+    if width_img and os.path.exists(width_img):
+        width_img_rel = "../{}".format(os.path.relpath(width_img, OUTPUT_DIR).replace("\\", "/"))
+    if congestion_img and os.path.exists(congestion_img):
+        cong_img_rel = "../{}".format(os.path.relpath(congestion_img, OUTPUT_DIR).replace("\\", "/"))
 
     # ---- 从报告中提取关键指标 ----
     market_status = ""
@@ -226,14 +214,14 @@ tr:nth-child(even) {{ background: #fafafa; }}
 
     # 图表区域
     charts_section = ""
-    if width_img_b64 or cong_img_b64:
+    if width_img_rel or cong_img_rel:
         charts_section = '<div class="section"><h2>[*][*] 市场热力图</h2>'
-        if width_img_b64:
+        if width_img_rel:
             charts_section += '<p style="font-size:0.88em;color:#666;margin:8px 0 4px;">均线市场宽度 (越高越好)</p>'
-            charts_section += '<img class="chart-img" src="%s" alt="width heatmap">' % width_img_b64
-        if cong_img_b64:
+            charts_section += '<img class="chart-img" src="%s" alt="width heatmap">' % width_img_rel
+        if cong_img_rel:
             charts_section += '<p style="font-size:0.88em;color:#666;margin:14px 0 4px;">行业拥挤度 (适中为宜)</p>'
-            charts_section += '<img class="chart-img" src="%s" alt="congestion heatmap">' % cong_img_b64
+            charts_section += '<img class="chart-img" src="%s" alt="congestion heatmap">' % cong_img_rel
         charts_section += "</div>"
 
     # TOP15 表格行
