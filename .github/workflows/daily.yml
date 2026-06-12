@@ -1,0 +1,57 @@
+name: 每日行业报告
+
+on:
+  schedule:
+    # 北京时间每天早上8点 = UTC 0:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: 安装系统依赖（中文字体）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-wqy-microhei
+          fc-cache -fv
+
+      - name: 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 运行 daily_run
+        run: |
+          python daily_run.py
+
+      - name: 提交生成的文件
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 获取当日日期
+          TODAY=$(date +%Y-%m-%d)
+
+          git add report/ rank/ width/ congestion/ quotes/ output/ 2>/dev/null || true
+
+          # 仅在有变更时提交
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "auto: 每日报告 ${TODAY}"
+            git push
+          fi
