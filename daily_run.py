@@ -207,6 +207,22 @@ tr:nth-child(even) {{ background: #fafafa; }}
 </div>
 
 <div class="footer">由 sw2_daily 自动生成 | Powered by legulegu + akshare</div>
+
+<script>
+(function() {{
+  // 仅当通过网络访问（非本地 file://）时，将图片相对路径替换为绝对路径
+  if (location.protocol === 'file:') return;
+
+  var GITHUB_BASE = 'https://dixinl.github.io/test1/';
+  var imgs = document.querySelectorAll('img.chart-img');
+  for (var i = 0; i < imgs.length; i++) {{
+    var src = imgs[i].getAttribute('src');
+    if (src && src.indexOf('../') === 0) {{
+      imgs[i].src = GITHUB_BASE + src.substring(3);
+    }}
+  }}
+}})();
+</script>
 </body>
 </html>"""
 
