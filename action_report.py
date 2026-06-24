@@ -408,6 +408,7 @@ def get_history_width(code, days=HISTORY_DAYS):
 
 
 def get_history_congestion(code, days=HISTORY_DAYS):
+    """获取历史拥挤度 (只用 turnoverRateFQuantile 换手率分位数)"""
     if code not in c["congestions"]:
         return []
     values = c["congestions"][code]
@@ -416,8 +417,7 @@ def get_history_congestion(code, days=HISTORY_DAYS):
         v = values[i]
         if isinstance(v, dict):
             t = v.get("turnoverRateFQuantile", 0) or 0
-            a = v.get("amountCongestionQuantile", 0) or 0
-            history.append((t + a) / 2)
+            history.append(t)
         else:
             history.append(0)
     return history
@@ -444,119 +444,483 @@ def calc_scene_consistency(scene_history):
 # 3. 场景判断规则
 # ============================================================
 
+# 三分法阈值
+W_LOW, W_MID, W_HIGH = 0, 50, 80   # 宽度: 低(<50) / 中(50~80) / 高(>=80)
+C_LOW, C_MID, C_HIGH = 0, 50, 80   # 拥挤度: 低(<50) / 中(50~80) / 高(>=80)
+
+
 def classify_width(w_val):
-    return ("高", 1) if w_val >= WIDTH_THRESHOLD else ("低", 0)
+    """三分法宽度分类: 返回 (等级名, 数字编码)"""
+    if w_val >= W_HIGH:
+        return ("高", 2)
+    elif w_val >= W_MID:
+        return ("中", 1)
+    else:
+        return ("低", 0)
 
 
 def classify_congestion(c_val):
-    return ("高", 1) if c_val >= CONGESTION_THRESHOLD else ("低", 0)
+    """三分法拥挤度分类: 返回 (等级名, 数字编码)"""
+    if c_val >= C_HIGH:
+        return ("高", 2)
+    elif c_val >= C_MID:
+        return ("中", 1)
+    else:
+        return ("低", 0)
+
+
+# ============================================================
+# 3x3 场景矩阵 (9个场景)
+# 行: 宽度(低/中/高), 列: 拥挤度(低/中/高)
+#
+#           拥挤<50     拥挤50~80   拥挤>=80
+#         ┌─────────┬──────────┬─────────┐
+# 宽度>=80│ S1 强势  │ S2 加速   │ S3 极端  │
+# 宽度50~80│ S4 回暖  │ S5 盘整   │ S6 警惕  │
+# 宽度<50 │ S7 冰封  │ S8 探底   │ S9 出逃  │
+# ============================================================
+SCENE_MATRIX = {
+    # w=高(2), c=低(0)
+    (2, 0): ("S1:强势启动", "#22c55e", "积极做多"),      # 绿色-强
+    # w=高(2), c=中(1)
+    (2, 1): ("S2:加速上行", "#84cc16", "追多控仓"),       # 浅绿
+    # w=高(2), c=高(2)
+    (2, 2): ("S3:极端过热", "#eab308", "逢高减仓"),       # 黄色-警告
+
+    # w=中(1), c=低(0)
+    (1, 0): ("S4:回暖蓄势", "#06b6d4", "逢低吸纳"),       # 青
+    # w=中(1), c=中(1)
+    (1, 1): ("S5:盘整选择", "#8b5cf6", "耐心等待"),       # 紫
+    # w=中(1), c=高(2)
+    (1, 2): ("S6:高位滞涨", "#f97316", "逐步撤离"),       # 橙-警示
+
+    # w=低(0), c=低(0)
+    (0, 0): ("S7:冰封观望", "#3b82f6", "远离观望"),       # 蓝
+    # w=低(0), c=中(1)
+    (0, 1): ("S8:探底企稳", "#6366f1", "密切跟踪"),       # 靛蓝
+    # w=低(0), c=高(2)
+    (0, 2): ("S9:恐慌出逃", "#ef4444", "坚决规避"),       # 红-危险
+}
 
 
 def get_scene(w, c_val):
-    if w == 0 or c_val is None:
-        return "数据缺失", "gray", ""
+    """三分法9场景判断"""
+    if c_val is None:
+        return "数据缺失(拥挤度)", "gray", ""
     _, w_num = classify_width(w)
     _, c_num = classify_congestion(c_val)
-    if w_num == 0 and c_num == 0:
-        return "场景4:弱势磨底", "blue", "观望"
-    elif w_num == 1 and c_num == 0:
-        return "场景1:最佳做多", "green", "做多/加仓"
-    elif w_num == 1 and c_num == 1:
-        return "场景2:持有减仓", "yellow", "持有/控仓"
+
+    key = (w_num, c_num)
+    if key in SCENE_MATRIX:
+        name, color, action = SCENE_MATRIX[key]
+        return name, color, action
     else:
-        return "场景3:高危见顶", "red", "卖出/避险"
+        return "未知场景", "gray", ""
 
 
-def calc_confidence(row):
+def calc_width_confidence(row):
     """
-    计算信号置信度 (0-100)
-    综合考虑: 场景一致性 + 宽度趋势 + 价格趋势(3/5/10/20日)
+    宽度维度置信度 (0-100) - 三分法9场景版
+
+    评估项:
+      - 场景一致性 (颜色稳定性): 0~25分
+      - 宽度趋势方向与场景是否匹配: 0~35分
+      - 价格趋势(行情数据)交叉验证: 0~40分
     """
-    conf = 50
+    conf = 30  # 基础分
     scene = row.get("scene", "")
+    sc = row.get("scene_consistency", 0.5)
+    wt = row.get("width_trend", 0)
 
-    # 1. 场景一致性 (0-25)
-    conf += row.get("scene_consistency", 0.5) * 25
+    # ---- 1. 场景一致性 (0~25) ----
+    conf += sc * 25
 
-    # 2. 宽度趋势 (0-15)
-    width_trend = row.get("width_trend", 0)
-    cong_trend = row.get("cong_trend", 0)
+    # ---- 2. 宽度趋势方向匹配 (0~35 / -10~-20) ----
+    # S1/S2/S3 (高宽度): 应该向上
+    if "S1:" in scene or "S2:" in scene or "S3:" in scene:
+        if wt >= 4:
+            conf += 35
+        elif wt >= 2:
+            conf += 28
+        elif wt > 0:
+            conf += 18
+        elif wt <= -4:
+            conf -= 20
+        elif wt <= -2:
+            conf -= 12
+        elif wt < 0:
+            conf -= 6
+    # S7/S8/S9 (低宽度): 应该向下或持平
+    elif "S7:" in scene or "S9:" in scene:
+        if wt <= -4:
+            conf += 35
+        elif wt <= -2:
+            conf += 28
+        elif wt < 0:
+            conf += 18
+        elif wt >= 4:
+            conf -= 20       # 弱势中反而扩张=异常
+        elif wt >= 2:
+            conf -= 12
+        elif wt > 0:
+            conf -= 6
+    # S4/S5/S6 (中宽度): 允许小幅波动
+    elif "S4:" in scene:
+        # 回暖蓄势: 向上为正
+        if wt >= 2:
+            conf += 28
+        elif wt > 0:
+            conf += 18
+        elif wt <= -2:
+            conf -= 10
+    elif "S5:" in scene or "S6:" in scene:
+        # 盘整/滞涨: 向下略好(回归合理), 向上需谨慎
+        if wt >= 4:
+            conf -= 15
+        elif wt >= 2:
+            conf -= 8
+        elif wt <= -2:
+            conf += 10
+        elif wt <= 0:
+            conf += 5
 
-    if "场景1" in scene and width_trend > 0:
-        conf += 15
-    elif "场景2" in scene and width_trend > 0:
-        conf += 10
-    elif "场景3" in scene and width_trend < 0:
-        conf += 15
-    elif "场景4" in scene and width_trend < 0:
-        conf += 10
-    elif width_trend < -5:
-        conf -= 10
-
-    # 3. 价格趋势加分 (0-15) —— 新增：从行情CSV判断
+    # ---- 3. 价格趋势验证 (0~40) ----
     chg_3d = row.get("chg_3d", 0)
     chg_5d = row.get("chg_5d", 0)
     chg_10d = row.get("chg_10d", 0)
     chg_20d = row.get("chg_20d", 0)
 
-    # 短中长期趋势一致性判断
-    if "场景1" in scene or "场景2" in scene:
-        # 做多/持有场景：价格趋势向上加分
-        if chg_3d > 0 and chg_5d > 0:
-            conf += 10  # 短期趋势一致向上
+    # S1/S2 (强势/做多区间): 价格应向上
+    if "S1:" in scene or "S2:" in scene:
+        if chg_3d > 0 and chg_5d > 0 and chg_10d > 0:
+            conf += 40
         elif chg_5d > 0 and chg_10d > 0:
-            conf += 8  # 中期趋势向上
+            conf += 30
         elif chg_10d > 0 and chg_20d > 0:
-            conf += 5  # 长期趋势向上
+            conf += 18
         elif chg_3d < -5 and chg_5d < -3:
-            conf -= 10  # 短期反转预警
-
-    elif "场景3" in scene:
-        # 高危场景：价格持续走弱=确认顶部
+            conf -= 15
+        elif chg_5d < 0:
+            conf -= 8
+    # S3/S6 (过热/滞涨): 价格走弱=确认见顶
+    elif "S3:" in scene or "S6:" in scene:
         if chg_5d < 0 and chg_10d < 0 and chg_20d < 0:
-            conf += 15  # 全周期下跌，顶部确认
+            conf += 40
         elif chg_5d < 0 and chg_10d < 0:
-            conf += 10
+            conf += 30
         elif chg_3d > 0:
-            conf -= 8  # 短期反弹但大趋势向下，可能是诱多
-
-    elif "场景4" in scene:
-        # 磨底场景：价格企稳=底部信号
-        if chg_5d > 0 and chg_10d < 0:
-            conf += 8  # 短期企稳，可能反转
+            conf -= 15        # 短期反弹=诱多
+        elif chg_5d > 0:
+            conf -= 8
+    # S4/S5/S8 (回暖/盘整/探底): 价格企稳=正面信号
+    elif "S4:" in scene:
+        if chg_5d > 0 and chg_10d > 0:
+            conf += 25        # 确认回升
+        elif chg_5d > 0 and chg_10d < 0:
+            conf += 18        # 短期企稳
         elif chg_20d < -15:
-            conf += 5  # 超跌可能靠近底部
-
-    # 4. 拥挤度趋势 (0-5)
-    if "场景2" in scene and cong_trend > 2:
-        conf -= 5  # 拥挤度加速上升=过热风险
-    elif "场景3" in scene and cong_trend < -2:
-        conf += 5  # 拥挤度回落=风险释放
+            conf += 12        # 超跌反弹空间
+    elif "S8:" in scene:
+        if chg_5d > 0 and chg_10d > 0:
+            conf += 25        # 探底成功
+        elif chg_5d > 0:
+            conf += 15        # 反弹试探
+        elif chg_5d < -3:
+            conf -= 10        # 继续探底
+    # S7/S9 (冰封/出逃): 极端弱势
+    elif "S7:" in scene:
+        if chg_20d < -20:
+            conf += 15        # 超跌极端
+        elif chg_5d > 0:
+            conf += 10        # 死猫跳
+    elif "S9:" in scene:
+        if chg_5d < 0 and chg_10d < 0 and chg_20d < 0:
+            conf += 30        # 确认恐慌
+        elif chg_5d < 0:
+            conf += 18
+        elif chg_3d > 0:
+            conf -= 12        # 反弹可能是陷阱
 
     return max(0, min(100, int(conf)))
 
 
-def signal_type(consistency, trend):
+def calc_congestion_confidence(row):
+    """
+    拥挤度维度置信度 (0-100) - 三分法9场景版
+
+    评估项:
+      - 场景一致性 (颜色稳定性): 0~35分
+      - 拥挤度趋势方向与场景是否匹配: 0~35分
+      - 拥挤度绝对水平合理性: 0~30分
+    """
+    conf = 30  # 基础分
+    scene = row.get("scene", "")
+    sc = row.get("scene_consistency", 0.5)
+    ct = row.get("cong_trend", 0)
+    avg_cong = row.get("avg_cong", 0)
+
+    # ---- 1. 场景一致性 (0~35) ----
+    conf += sc * 35
+
+    # ---- 2. 拥挤度趋势方向匹配 (0~35 / -10~-20) ----
+    # S1/S4/S7 (低拥挤区 c<50): 不升温是好的
+    if "S1:" in scene or "S4:" in scene or "S7:" in scene:
+        if ct <= -2:
+            conf += 35
+        elif ct <= 0:
+            conf += 22
+        elif ct >= 4:
+            conf -= 20        # 低拥挤急升=异常
+        elif ct >= 2:
+            conf -= 12
+        else:
+            conf -= 6
+    # S2/S5 (中拥挤区 c:50~80): 温和可控
+    elif "S2:" in scene or "S5:" in scene:
+        if ct <= 0:
+            conf += 30        # 未升温=健康
+        elif ct <= 2:
+            conf += 15
+        elif ct >= 4:
+            conf -= 20
+        else:
+            conf -= 8
+    # S3/S6/S9 (高拥挤区 c>=80): 应降温
+    elif "S3:" in scene or "S6:" in scene or "S9:" in scene:
+        if ct <= -3:
+            conf += 35        # 明显降温=风险释放
+        elif ct <= -1:
+            conf += 22
+        elif ct >= 2:
+            conf -= 15        # 还在升温=风险加剧
+        else:
+            conf -= 6
+
+    # ---- 3. 拥挤度绝对水平合理性 (0~30) ----
+    # S1/S4/S7 (预期低拥挤)
+    if "S1:" in scene or "S4:" in scene or "S7:" in scene:
+        if avg_cong < 30:
+            conf += 30
+        elif avg_cong < 45:
+            conf += 20
+        elif avg_cong < 55:
+            conf += 8
+        else:
+            conf -= 10        # 应低却高=矛盾
+    # S2/S5 (预期中拥挤)
+    elif "S2:" in scene or "S5:" in scene:
+        if 40 <= avg_cong <= 70:
+            conf += 20        # 刚好在中间带
+        elif avg_cong > 80:
+            conf -= 8         # 偏高了
+        elif avg_cong < 30:
+            conf -= 5         # 偏低了
+    # S3/S6/S9 (预期高拥挤)
+    elif "S3:" in scene or "S6:" in scene or "S9:" in scene:
+        if avg_cong > 85:
+            conf -= 10        # 极端拥挤
+        elif avg_cong > 70:
+            conf += 5
+        elif avg_cong < 50:
+            conf -= 8         # 标记高拥挤但实际偏低
+
+    return max(0, min(100, int(conf)))
+
+
+def calc_confidence(row):
+    """
+    综合置信度 (0-100)
+
+    加权合并两个维度:
+      - 宽度权重 60% (主趋势指标)
+      - 拥挤度权重 40% (辅助/修正指标)
+
+    当两维度方向一致时给予额外加分(共振效应);
+    方向矛盾时给予惩罚(冲突降权).
+    """
+    wc = calc_width_confidence(row)
+    cc = calc_congestion_confidence(row)
+    scene = row.get("scene", "")
+
+    # 基础加权: 60%宽度 + 40%拥挤度
+    combined = wc * 0.6 + cc * 0.4
+
+    # 共振/冲突修正 (±10)
+    # 两边都高(>=70)或都低(<40)=共振; 一高一低=冲突
+    if wc >= 70 and cc >= 70:
+        combined += 10       # 双重确认，强信号
+    elif wc < 40 and cc < 40:
+        combined -= 5        # 双弱，整体不可靠
+    elif abs(wc - cc) > 35:
+        combined -= 8        # 维度间矛盾较大
+
+    return max(0, min(100, int(round(combined))))
+
+
+def signal_type(consistency, trend, scene=None, width_val=0):
+    """
+    三级信号分类，偏细时根据S1-S9场景给出方向性描述
+
+    参数:
+      consistency: 场景颜色一致性 (0~1)
+      trend:       宽度日均变化量
+      scene:       当前Sx场景名
+      width_val:   当前市场宽度值
+
+    返回: (类型标签, 图标标记)
+    """
+    # ---- 趋势: 稳定且动能明确 ----
     if consistency >= 0.6 and abs(trend) >= 2:
         return "趋势", "★"
-    elif consistency >= 0.4:
-        return "偏稳", "☆"
-    else:
+
+    # ---- 偶发: 频繁跳变，不可靠 ----
+    elif consistency < 0.4:
         return "偶发", "○"
 
+    # ---- 偏稳: 有持续性但动能不足，按S1-S9细分 ----
+    if not scene:
+        return "偏稳", "☆"
 
-def price_trend_label(chg_3d, chg_5d, chg_10d):
-    """价格趋势标签"""
-    if chg_5d > 2 and chg_10d > 0:
-        return "↑↑ 强势"
-    elif chg_5d > 0:
-        return "↑ 偏强"
-    elif chg_5d < -2 and chg_10d < 0:
-        return "↓↓ 弱势"
-    elif chg_5d < 0:
-        return "↓ 偏弱"
+    # S1/S2/S3 区间 (高宽度 - 做多/追多/减仓)
+    if "S1:" in scene or "S2:" in scene or "S3:" in scene:
+        if abs(trend) >= 3:
+            return "偏稳(加速)", "☆"
+        elif abs(trend) >= 1:
+            return "偏稳(延续)", "☆"
+        elif trend > 0:
+            return "偏稳(缓升)", "☆"
+        elif trend > -1:
+            return "偏稳(横盘)", "☆"
+        else:
+            return "偏稳(回落)", "☆"
+
+    # S4 区间 (中宽低拥 - 回暖蓄势)
+    elif "S4:" in scene:
+        if width_val >= 65:
+            return "偏稳(接近强势)", "☆"
+        elif trend > 0:
+            return "偏稳(稳步回升)", "☆"
+        elif trend > -1:
+            return "偏稳(平台整理)", "☆"
+        else:
+            return "偏稳(回调确认)", "☆"
+
+    # S5 区间 (中宽中拥 - 方向不明最纠结的位置)
+    elif "S5:" in scene:
+        if trend > 0:
+            return "偏稳(偏多震荡)", "☆"
+        elif trend < 0:
+            return "偏稳(偏弱震荡)", "☆"
+        else:
+            return "偏稳(胶着)", "☆"
+
+    # S6 区间 (中宽高拥 - 高位警惕)
+    elif "S6:" in scene:
+        if width_val >= 70:
+            return "偏稳(高位风险)", "☆"
+        elif trend < -1:
+            return "偏稳(破位边缘)", "☆"
+        else:
+            return "偏稳(诱多嫌疑)", "☆"
+
+    # S7 区间 (低宽低拥 - 冰封观望)
+    elif "S7:" in scene:
+        if width_val >= 40:
+            return "偏稳(底部徘徊)", "☆"
+        elif trend > -3:
+            return "偏稳(阴跌放缓)", "☆"
+        else:
+            return "偏稳(自由落体)", "☆"
+
+    # S8 区间 (低宽中拥 - 探底企稳)
+    elif "S8:" in scene:
+        if trend > 1:
+            return "偏稳(反弹试探)", "☆"
+        elif trend > -1:
+            return "偏稳(磨底)", "☆"
+        else:
+            return "偏稳(再探前低)", "☆"
+
+    # S9 区间 (低宽高拥 - 恐慌出逃)
+    elif "S9:" in scene:
+        if trend < -3:
+            return "偏稳(崩盘)", "☆"
+        elif trend < 0:
+            return "偏稳(恐慌蔓延)", "☆"
+        else:
+            return "偏稳(超卖反弹)", "☆"
+
+    return "偏稳", "☆"
+
+
+
+
+
+
+
+
+def price_trend_label(chg_3d, chg_5d, chg_10d, chg_20d):
+    """
+    价格趋势标签 (综合 4 个时间维度)
+
+    分层判断:
+      第一层: 短期动能 (3日 + 5日) → 方向
+      第二层: 中期趋势 (10日 + 20日) → 确认/背离
+      组合出 9 级标签
+
+    返回: 趋势描述字符串
+    """
+    # ---- 短期方向 (3+5日) ----
+    if chg_5d > 2 and chg_3d > 1:
+        short = "强攻"      # 短期强劲上攻
+    elif chg_5d > 0 and chg_3d > 0:
+        short = "上行"      # 短期一致向上
+    elif chg_5d > 0 and chg_3d <= 0:
+        short = "反弹"      # 5日正但3日转弱，反弹乏力或回调中
+    elif chg_5d > -2 and chg_5d <= 0:
+        short = "整理"      # 小幅波动
     else:
-        return "→ 震荡"
+        short = "下挫"      # 短期明显下跌
+
+    # ---- 中期方向 (10+20日) ----
+    if chg_10d > 0 and chg_20d > 0:
+        mid = "多"          # 中期多头排列
+    elif chg_10d > 0 and chg_20d <= 0:
+        mid = "转暖"        # 中期刚转正，底部回升中
+    elif chg_10d <= 0 and chg_20d > 0:
+        mid = "回落"        # 中期从高位回落
+    else:
+        mid = "空"          # 中期空头排列
+
+    # ---- 组合标签 ----
+    combo_map = {
+        ("强攻", "多"):   "↑↑↑ 强势突破",
+        ("强攻", "转暖"): "↑↑ 强势反转",
+        ("强攻", "回落"): "↑↑ 反弹受阻",
+        ("强攻", "空"):   "↑ 超跌反弹",
+
+        ("上行", "多"):   "↑↑ 稳步上行",
+        ("上行", "转暖"): "↑ 偏强回暖",
+        ("上行", "回落"): "→ 高位震荡",
+        ("上行", "空"):   "↑ 弱势反抽",
+
+        ("反弹", "多"):   "↑ 震荡偏强",
+        ("反弹", "转暖"): "→ 底部企稳",
+        ("反弹", "回落"): "↓ 弱势震荡",
+        ("反弹", "空"):   "↓ 阴跌不止",
+
+        ("整理", "多"):   "→ 横盘蓄势",
+        ("整理", "转暖"): "→ 磨底待变",
+        ("整理", "回落"): "↓ 高位滞涨",
+        ("整理", "空"):   "↓ 阴跌整理",
+
+        ("下挫", "多"):   "↓ 急跌反弹",
+        ("下挫", "转暖"): "↓ 探底过程中",
+        ("下挫", "回落"): "↓↓ 加速下跌",
+        ("下挫", "空"):   "↓↓↓ 深度弱势",
+    }
+
+    return combo_map.get((short, mid), "→ 震荡")
 
 
 # ============================================================
@@ -628,7 +992,10 @@ for code in all_codes:
     else:
         turnover, amount = 0, 0
 
-    avg_cong = (turnover + amount) / 2 if turnover else 0
+    # 场景判断只用换手率分位数 (turnoverRateFQuantile)
+    # 成交额拥挤度 (amountCongestionQuantile) 作为辅助参考
+    cong_for_scene = turnover
+    avg_cong = (turnover + amount) / 2 if turnover else 0  # 综合值仅用于展示
 
     # 历史宽度/拥挤度
     hist_width = get_history_width(code, HISTORY_DAYS)
@@ -643,9 +1010,10 @@ for code in all_codes:
         scene_history.append(color)
     scene_consistency = calc_scene_consistency(scene_history)
 
-    # 当前场景
-    scene, color, action = get_scene(latest_width, avg_cong)
-    sig_type, sig_mark = signal_type(scene_consistency, width_trend)
+    # 当前场景: 拥挤度只用 turnoverRateFQuantile 判断
+    scene, color, action = get_scene(latest_width, cong_for_scene)
+    sig_type, sig_mark = signal_type(scene_consistency, width_trend,
+                                     scene=scene, width_val=latest_width)
 
     # 行情趋势数据（从CSV匹配）
     quotes = name_to_quotes.get(name, {})
@@ -674,8 +1042,10 @@ for code in all_codes:
         "chg_5d": chg_5d,
         "chg_10d": chg_10d,
         "chg_20d": chg_20d,
-        "price_trend": price_trend_label(chg_3d, chg_5d, chg_10d),
+        "price_trend": price_trend_label(chg_3d, chg_5d, chg_10d, chg_20d),
     }
+    row["width_conf"] = calc_width_confidence(row)
+    row["cong_conf"] = calc_congestion_confidence(row)
     row["confidence"] = calc_confidence(row)
     industries.append(row)
 
@@ -686,37 +1056,39 @@ if quotes_matched == 0 and industries:
     print("  [WARNING] 所有行业行情数据为空! 检查 quotes/ CSV 列名是否正确")
 
 # ============================================================
-# 6. 按场景和置信度分类
+# 6. 按S1-S9场景分类
 # ============================================================
-scene1 = [i for i in industries if "场景1" in i["scene"]]
-scene2 = [i for i in industries if "场景2" in i["scene"]]
-scene3 = [i for i in industries if "场景3" in i["scene"]]
-scene4 = [i for i in industries if "场景4" in i["scene"]]
+SCENE_KEYS = ["S1:", "S2:", "S3:", "S4:", "S5:", "S6:", "S7:", "S8:", "S9:"]
+scene_groups = {}
+for sk in SCENE_KEYS:
+    scene_groups[sk] = [i for i in industries if sk in i["scene"]]
+scene_missing = [i for i in industries if "数据缺失" in i.get("scene", "")]
 
-for s in [scene1, scene2, scene3, scene4]:
+for s in scene_groups.values():
     s.sort(key=lambda x: (x["confidence"], x["width"]), reverse=True)
 
-trend_scene1 = [i for i in scene1 if i["signal_type"] == "趋势"]
-trend_scene2 = [i for i in scene2 if i["signal_type"] == "趋势"]
-trend_scene3 = [i for i in scene3 if i["signal_type"] == "趋势"]
-trend_scene4 = [i for i in scene4 if i["signal_type"] == "趋势"]
+trend_groups = {}
+stable_groups = {}
+for sk in SCENE_KEYS:
+    trend_groups[sk] = [i for i in scene_groups[sk] if i["signal_type"] == "趋势"]
+    stable_groups[sk] = [i for i in scene_groups[sk] if "偏稳" in i["signal_type"]]
 
 # ============================================================
 # 7. 一级行业场景分布
 # ============================================================
-sw1_scene_count = defaultdict(lambda: {"scene1": 0, "scene2": 0, "scene3": 0, "scene4": 0})
+sw1_scene_count = defaultdict(lambda: {sk: 0 for sk in SCENE_KEYS})
 sw1_trend_count = defaultdict(lambda: {"trend": 0, "sporadic": 0})
 
 for ind in industries:
     sw1 = ind["sw1"]
-    if "场景1" in ind["scene"]:
-        sw1_scene_count[sw1]["scene1"] += 1
-    elif "场景2" in ind["scene"]:
-        sw1_scene_count[sw1]["scene2"] += 1
-    elif "场景3" in ind["scene"]:
-        sw1_scene_count[sw1]["scene3"] += 1
-    else:
-        sw1_scene_count[sw1]["scene4"] += 1
+    matched = False
+    for sk in SCENE_KEYS:
+        if sk in ind["scene"]:
+            sw1_scene_count[sw1][sk] += 1
+            matched = True
+            break
+    if not matched:
+        sw1_scene_count[sw1]["数据缺失"] = sw1_scene_count[sw1].get("数据缺失", 0) + 1
 
     if ind["signal_type"] == "趋势":
         sw1_trend_count[sw1]["trend"] += 1
@@ -748,22 +1120,27 @@ avg_w = sum(i["width"] for i in valid) / total if total else 0
 avg_c_list = [i["avg_cong"] for i in valid if i["avg_cong"] > 0]
 avg_c = sum(avg_c_list) / len(avg_c_list) if avg_c_list else 0
 avg_w_trend = sum(i["width_trend"] for i in valid) / total if total else 0
+avg_c_trend = sum(i["cong_trend"] for i in valid) / total if total else 0
 
-market_status = "极弱" if avg_w < 20 else "弱势" if avg_w < 40 else "中性" if avg_w < 60 else "强势"
+market_status = "极弱" if avg_w < 30 else "弱势" if avg_w < 50 else "中性" if avg_w < 70 else "强势"
 trend_status = "上升" if avg_w_trend > 2 else "下降" if avg_w_trend < -2 else "震荡"
+cong_status = "高热" if avg_c >= C_HIGH else "适中" if avg_c >= C_MID else "清淡"
+cong_trend_status = "升温" if avg_c_trend > 1 else "降温" if avg_c_trend < -1 else "平稳"
 
 lines.append("")
 lines.append("  【市场宽度】")
 lines.append("    均值: {:.1f}  状态: {}  趋势: {} ({:+.1f}/天)".format(avg_w, market_status, trend_status, avg_w_trend))
-lines.append("    强势行业(>=60): {} 个    弱势行业(<60): {} 个".format(
-    len([i for i in valid if i["width"] >= 60]),
-    len([i for i in valid if 0 < i["width"] < 60])))
+lines.append("    高(>=80): {} 个  中(50~80): {} 个  低(<50): {} 个".format(
+    len([i for i in valid if i["width"] >= W_HIGH]),
+    len([i for i in valid if W_MID <= i["width"] < W_HIGH]),
+    len([i for i in valid if i["width"] < W_MID])))
 lines.append("")
 lines.append("  【市场拥挤度】")
-lines.append("    均值: {:.1f}".format(avg_c))
-lines.append("    高拥挤(>=60): {} 个    低拥挤(<60): {} 个".format(
-    len([i for i in valid if i["avg_cong"] >= 60]),
-    len([i for i in valid if 0 < i["avg_cong"] < 60])))
+lines.append("    均值: {:.1f}  状态: {}  趋势: {} ({:+.2f}/天)".format(avg_c, cong_status, cong_trend_status, avg_c_trend))
+lines.append("    高(>=80): {} 个  中(50~80): {} 个  低(<50): {} 个".format(
+    len([i for i in valid if i["avg_cong"] >= C_HIGH]),
+    len([i for i in valid if C_MID <= i["avg_cong"] < C_HIGH]),
+    len([i for i in valid if i["avg_cong"] < C_MID])))
 lines.append("")
 lines.append("  【行情趋势】(来自行情CSV)")
 avg_chg5 = sum(i["chg_5d"] for i in valid) / total if total else 0
@@ -776,8 +1153,22 @@ lines.append("    5日上涨: {} 个    10日上涨: {} 个".format(price_up5, p
 lines.append("")
 lines.append("  【信号类型统计】")
 trend_cnt = len([i for i in valid if i["signal_type"] == "趋势"])
+stable_cnt = len([i for i in valid if "偏稳" in i.get("signal_type", "")])
 sporadic_cnt = len([i for i in valid if i["signal_type"] == "偶发"])
-lines.append("    趋势信号: {} 个    偶发信号: {} 个".format(trend_cnt, sporadic_cnt))
+lines.append("    ★趋势: {} 个    ☆偏稳: {} 个    ○偶发: {} 个  (合计: {} 个)".format(
+    trend_cnt, stable_cnt, sporadic_cnt, trend_cnt + stable_cnt + sporadic_cnt))
+
+# 偏稳子类型细分
+if stable_cnt > 0:
+    stable_types = {}
+    for i in valid:
+        st = i.get("signal_type", "")
+        if "偏稳" in st:
+            stable_types[st] = stable_types.get(st, 0) + 1
+    if stable_types:
+        sorted_stable = sorted(stable_types.items(), key=lambda x: -x[1])
+        detail = "  ".join(["{}:{}".format(k, v) for k, v in sorted_stable])
+        lines.append("    [☆偏稳细分] {}".format(detail))
 lines.append("")
 lines.append("  【当前市场判断】")
 lines.append("    {} + {} = {}".format(
@@ -788,39 +1179,99 @@ lines.append("    {} + {} = {}".format(
     "主升行情" if avg_w >= 40 and avg_c >= 60 else
     "启动初期"))
 
-# ---- 二、四大场景分布 ----
+# ---- 二、9场景分布 ----
 lines.append("")
 lines.append("-" * 95)
-lines.append("二、四大场景分布 (共 {} 个有效行业)".format(len(valid)))
+lines.append("二、九场景矩阵 (共 {} 个有效行业)".format(len(valid)))
 lines.append("-" * 95)
 lines.append("")
-lines.append("  {:^20} {:>6} {:>6} {:>8}  {}".format("场景", "总数", "趋势", "置信度", "说明"))
-lines.append("  " + "-" * 60)
-for sname, slist, tlist in [
-    ("场景1:最佳做多", scene1, trend_scene1),
-    ("场景2:持有减仓", scene2, trend_scene2),
-    ("场景3:高危见顶", scene3, trend_scene3),
-    ("场景4:弱势磨底", scene4, trend_scene4),
-]:
+lines.append("  {:^16} {:>4} {:>4} {:>4} {:>6}  {}".format(
+    "场景", "总数", "★趋势", "☆偏稳", "置信度", "[☆偏稳细分]"))
+lines.append("  " + "-" * 80)
+
+# S1-S9 按行输出
+for sk in SCENE_KEYS:
+    slist = scene_groups.get(sk, [])
+    tlist = trend_groups.get(sk, [])
+    stable_list = stable_groups.get(sk, [])
     avg_conf = sum(i["confidence"] for i in slist) / len(slist) if slist else 0
-    lines.append("  {:^20} {:>6} {:>6} {:>8.0f}  {}".format(
-        sname, len(slist), len(tlist), avg_conf, ""))
+
+    # 偏稳子类型统计
+    stable_detail = ""
+    if stable_list:
+        sub_counts = {}
+        for i in stable_list:
+            st = i.get("signal_type", "")
+            sub_counts[st] = sub_counts.get(st, 0) + 1
+        sorted_sub = sorted(sub_counts.items(), key=lambda x: -x[1])
+        detail_parts = ["{}{}".format(k, v) for k, v in sorted_sub]
+        stable_detail = " ".join(detail_parts)
+
+    lines.append("  {:^16} {:>4} {:>4} {:>4} {:>6.0f}  {}".format(
+        slist[0]["scene"] if slist else sk.replace(":", ""), len(slist), len(tlist), len(stable_list), avg_conf, stable_detail))
+
+# 数据缺失行
+if scene_missing:
+    lines.append("  {:^16} {:>4}".format("⚠ 数据缺失", len(scene_missing)))
+    missing_w0 = sum(1 for i in scene_missing if i.get("width", 0) == 0)
+    missing_c_none = sum(1 for i in scene_missing if i.get("avg_cong") is None or i.get("avg_cong") == 0)
+    reasons = []
+    if missing_w0 > 0:
+        reasons.append("宽度=0:{}".format(missing_w0))
+    if missing_c_none > 0:
+        reasons.append("拥挤度空:{}".format(missing_c_none))
+    lines.append("  {:^16} {}".format("", " | ".join(reasons)))
+
+# 校验行
+scene_total = sum(len(scene_groups.get(sk, [])) for sk in SCENE_KEYS) + len(scene_missing)
+if scene_total != total:
+    lines.append("  {:^16} {:>4} (校验: 场景{} + 缺失{} = {} vs 总数{})".format(
+        "合计", scene_total, scene_total - len(scene_missing), len(scene_missing), scene_total, total))
+else:
+    lines.append("  {:^16} {:>4}".format("合计", scene_total))
+    if scene_missing:
+        missing_w0 = sum(1 for i in scene_missing if i.get("width", 0) == 0)
+        missing_c_none = sum(1 for i in scene_missing if i.get("avg_cong") is None or i.get("avg_cong") == 0)
+        reasons = []
+        if missing_w0 > 0:
+            reasons.append("宽度=0:{}".format(missing_w0))
+        if missing_c_none > 0:
+            reasons.append("拥挤度空:{}".format(missing_c_none))
+        if reasons:
+            lines.append("  {:^16} {}".format("", " | ".join(reasons)))
+
 lines.append("")
+lines.append("  [9场景矩阵速查]")
+lines.append("           拥挤<50        拥挤50~80      拥挤>=80")
+lines.append("         ┌─────────┬──────────┬─────────┐")
+lines.append("  宽度>=80│ S1 强势   │ S2 加速   │ S3 极端  │  积极→追多→逢高减仓")
+lines.append("  宽度50~80│ S4 回暖   │ S5 盘整   │ S6 警惕  │  吸纳→等待→逐步撤离")
+lines.append("  宽度<50 │ S7 冰封   │ S8 探底   │ S9 出逃  │  观望→跟踪→坚决规避")
 lines.append("  [信号含义]")
-lines.append("  ★趋势: 过去{}天持续在该场景，信号可靠".format(HISTORY_DAYS))
+lines.append("  ★趋势: 场景稳定+动能明确，信号可靠")
+lines.append("  ☆偏稳: 有持续性但动能不足(按场景细分)")
 lines.append("  ○偶发: 今日刚进入该场景，需观察确认")
-lines.append("  场景1: 资金刚进场,趋势启动,重仓持有")
-lines.append("  场景2: 趋势延续但控仓,宽度收窄即离场")
-lines.append("  场景3: 抱团瓦解预警,全面减仓!")
-lines.append("  场景4: 磨底观望,不左侧抄底")
 
 
-def print_scene_table(title, scene_list, trend_list, max_rows, action_desc):
+def print_scene_table(title, scene_list, trend_list, stable_list=None, max_rows=10, action_desc=""):
     """打印场景详情表格（含行情趋势列）"""
+    if stable_list is None:
+        stable_list = []
+    sporadic_count = len(scene_list) - len(trend_list) - len(stable_list)
+
     lines.append("")
     lines.append("=" * 95)
     lines.append("{} --> {} 个".format(title, len(scene_list)))
-    lines.append("    趋势信号: {} 个 | 偶发信号: {} 个".format(len(trend_list), len(scene_list) - len(trend_list)))
+    lines.append("    ★趋势: {} 个 | ☆偏稳: {} 个 | ○偶发: {} 个".format(
+        len(trend_list), len(stable_list), sporadic_count))
+    if stable_list:
+        sub_counts = {}
+        for i in stable_list:
+            st = i.get("signal_type", "")
+            sub_counts[st] = sub_counts.get(st, 0) + 1
+        sorted_sub = sorted(sub_counts.items(), key=lambda x: -x[1])
+        detail_parts = ["{}{}".format(k, v) for k, v in sorted_sub]
+        lines.append("    [☆偏稳细分] {}".format("  ".join(detail_parts)))
     lines.append("=" * 95)
     if not scene_list:
         lines.append("  (当前无)")
@@ -828,25 +1279,51 @@ def print_scene_table(title, scene_list, trend_list, max_rows, action_desc):
     lines.append("")
     lines.append("  操作: {}".format(action_desc))
     lines.append("")
-    lines.append("  {:<4} {:<12} {:<9} {:>6} {:>6} {:>6} {:>7} {:>7} {:>7} {:>7} {}".format(
-        "信号", "一级行业", "二级行业", "宽度", "拥挤", "置信", "3日%", "5日%", "10日%", "20日%", "价格趋势"))
-    lines.append("  " + "-" * 93)
+    lines.append("  {:<14} {:<11} {:<8} {:>6} {:>6} {:>5} {:>5} {:>7} {:>7} {:>7} {:>7} {}".format(
+        "信号", "一级行业", "二级行业", "宽度", "拥挤", "宽信", "拥信", "3日%", "5日%", "10日%", "20日%", "价格趋势"))
+    lines.append("  " + "-" * 106)
     for i in scene_list[:max_rows]:
-        lines.append("  {}  {:<12} {:<9} {:>6.0f} {:>6.0f} {:>6.0f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {}".format(
-            i["signal_mark"], i["sw1"][:12], i["name"][:9],
-            i["width"], i["avg_cong"], i["confidence"],
+        # 信号列: 图标 + 子类型文本 (如 ☆偏稳(高位))
+        sig_display = "{}{}".format(i["signal_mark"], i.get("signal_type", ""))
+        lines.append("  {:<14} {:<11} {:<8} {:>6.0f} {:>6.0f} {:>5.0f} {:>5.0f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {}".format(
+            sig_display, i["sw1"][:11], i["name"][:8],
+            i["width"], i["avg_cong"],
+            i.get("width_conf", 0), i.get("cong_conf", 0),
             i["chg_3d"], i["chg_5d"], i["chg_10d"], i["chg_20d"],
             i["price_trend"]))
 
 
-print_scene_table("三、场景1: 最佳做多区间 (低拥挤+高宽度)", scene1, trend_scene1, 10,
-                  "做多/加仓 -- 趋势刚启动,顺势而为")
-print_scene_table("四、场景2: 持有减仓区间 (高拥挤+高宽度)", scene2, trend_scene2, 10,
-                  "持有/控仓 -- 趋势延续中但开始控风险,宽度收窄即离场")
-print_scene_table("五、场景3: 高危见顶区间 (高拥挤+低宽度)", scene3, trend_scene3, 15,
-                  "卖出/避险 -- 抱团瓦解预警! 龙头撑指数,多数个股跌")
-print_scene_table("六、场景4: 弱势磨底区间 (低拥挤+低宽度)", scene4, trend_scene4, 10,
-                  "观望/不抄底 -- 磨底期,等待宽度率先回升再布局")
+
+SCENE_TITLES = {
+    "S1:": ("三", "S1: 强势启动 (高宽低拥) - 积极做多"),
+    "S2:": ("四", "S2: 加速上行 (高宽中拥) - 追多控仓"),
+    "S3:": ("五", "S3: 极端过热 (高宽高拥) - 逢高减仓"),
+    "S4:": ("六", "S4: 回暖蓄势 (中宽低拥) - 逢低吸纳"),
+    "S5:": ("七", "S5: 盘整选择 (中宽中拥) - 耐心等待"),
+    "S6:": ("八", "S6: 高位滞涨 (中宽高拥) - 逐步撤离"),
+    "S7:": ("九", "S7: 冰封观望 (低宽低拥) - 远离观望"),
+    "S8:": ("十", "S8: 探底企稳 (低宽中拥) - 密切跟踪"),
+    "S9:": ("十一", "S9: 恐慌出逃 (低宽高拥) - 坚决规避"),
+}
+SCENE_ACTION_DESC = {
+    "S1:": "积极做多 -- 趋势刚启动,顺势而为",
+    "S2:": "追多控仓 -- 趋势延续中,注意过热风险",
+    "S3:": "逢高减仓 -- 极端过热,逐步撤离",
+    "S4:": "逢低吸纳 -- 回暖蓄势,逢低布局",
+    "S5:": "耐心等待 -- 方向不明,静观其变",
+    "S6:": "逐步撤离 -- 高位滞涨,控制风险",
+    "S7:": "远离观望 -- 极端弱势,远离市场",
+    "S8:": "密切跟踪 -- 探底企稳,密切关注",
+    "S9:": "坚决规避 -- 恐慌出逃,不可触碰",
+}
+
+for sk in SCENE_KEYS:
+    num, title = SCENE_TITLES.get(sk, ("?", sk))
+    print_scene_table("{}、{}".format(num, title), scene_groups.get(sk, []),
+                      trend_groups.get(sk, []),
+                      stable_list=stable_groups.get(sk, []),
+                      max_rows=len(scene_groups.get(sk, [])),
+                      action_desc=SCENE_ACTION_DESC.get(sk, ""))
 
 # ---- 七、一级行业全景 ----
 lines.append("")
@@ -860,11 +1337,14 @@ lines.append("  " + "-" * 70)
 for sw1 in sorted(sw1_scene_count.keys(), key=lambda x: -sum(sw1_scene_count[x].values())):
     cnt = sw1_scene_count[sw1]
     total_sw1 = sum(cnt.values())
-    dominant = max(cnt, key=cnt.get)
-    dom_cn = {"scene1": "场景1", "scene2": "场景2", "scene3": "场景3", "scene4": "场景4"}[dominant] if cnt[dominant] > 0 else "-"
+    # 一级行业: 显示主导Sx场景和各Sx计数
+    sorted_scenes = sorted(sw1_scene_count[sw1].items(), key=lambda x: -x[1])
+    dominant = sorted_scenes[0][0] if sorted_scenes else "?"
+    dom_label = dominant.replace(":", "") if dominant else "-"
     t = sw1_trend_count[sw1]
-    lines.append("  {:<12} {:>4} {:>4} {:>4} {:>4} {:>6}  {}  {}/{}".format(
-        sw1[:12], cnt["scene1"], cnt["scene2"], cnt["scene3"], cnt["scene4"], total_sw1, dom_cn, t["trend"], t["sporadic"]))
+    cols = "  ".join(["{:>3}".format(v) for k, v in sorted_scenes if k.startswith("S")])
+    lines.append("  {:<12} {} {:>6}  {}/{}".format(
+        sw1[:12], cols, total_sw1, dom_label, t["trend"], t["sporadic"]))
 
 # ---- 八、综合投资建议 ----
 lines.append("")
@@ -873,68 +1353,75 @@ lines.append("八、综合投资建议 (趋势信号优先 + 价格趋势验证)
 lines.append("=" * 95)
 lines.append("")
 
-if trend_scene1:
+# 做多方向: S1 + S4 的趋势信号
+buy_trends = trend_groups.get("S1:", []) + trend_groups.get("S4:", [])
+if buy_trends:
     lines.append("  【做多方向 - 趋势信号】(★★★ 可靠)")
-    for i in trend_scene1[:3]:
-        lines.append("    * {}({}) 宽度{:.0f},拥挤{:.0f},价格5日{:+5.1f}%,10日{:+5.1f}%".format(
-            i["name"], i["sw1"], i["width"], i["avg_cong"], i["chg_5d"], i["chg_10d"]))
+    for i in buy_trends[:5]:
+        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% 10日{:+.1f}%".format(
+            i["scene"].split(":")[0], i["name"], i["sw1"],
+            i["width"], i["avg_cong"], i["chg_5d"], i["chg_10d"]))
     lines.append("")
-
-if scene1:
-    other = [i for i in scene1 if i["signal_type"] != "趋势"]
-    if other:
-        lines.append("  【做多方向 - 偶发信号】(需观察,确认价格趋势) ")
-        for i in other[:2]:
-            lines.append("    * {}({}) 宽度{:.0f},拥挤{:.0f},价格5日{:+5.1f}% -- 观察确认".format(
-                i["name"], i["sw1"], i["width"], i["avg_cong"], i["chg_5d"]))
+    # S1/S4 偏稳
+    buy_stable = stable_groups.get("S1:", []) + stable_groups.get("S4:", [])
+    if buy_stable:
+        lines.append("  【做多/回暖 - 偏稳信号】(观察确认)")
+        for i in buy_stable[:3]:
+            lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} -- 观察确认".format(
+                i["scene"].split(":")[0], i["name"], i["sw1"], i["width"], i["avg_cong"]))
         lines.append("")
 
-if trend_scene2:
-    lines.append("  【控仓持有 - 趋势信号】(★★ 谨慎,关注价格是否转弱)")
-    for i in trend_scene2[:3]:
-        alert = " -- 价格5日转负,警惕!" if i["chg_5d"] < 0 else ""
-        lines.append("    * {}({}) 宽度{:.0f},拥挤{:.0f},价格5日{:+5.1f}%{}".format(
-            i["name"], i["sw1"], i["width"], i["avg_cong"], i["chg_5d"], alert))
+# 持有/追多: S2 的趋势信号
+hold_trends = trend_groups.get("S2:", [])
+if hold_trends:
+    lines.append("  【追多/持有 - 趋势信号】(★★ 控仓)")
+    for i in hold_trends[:3]:
+        alert = " ⚠价格5日转负" if i["chg_5d"] < 0 else ""
+        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}%{}".format(
+            i["scene"].split(":")[0], i["name"], i["sw1"],
+            i["width"], i["avg_cong"], i["chg_5d"], alert))
     lines.append("")
 
-if trend_scene3:
-    lines.append("  【规避减仓 - 趋势信号】(★★★ 紧急,价格趋势确认)")
-    for i in trend_scene3[:5]:
-        confirm = "[确认]全周期下跌" if (i["chg_5d"] < 0 and i["chg_10d"] < 0 and i["chg_20d"] < 0) else "需关注"
-        lines.append("    * {}({}) 宽度{:.0f},拥挤{:.0f},价格5日{:+5.1f}%,10日{:+5.1f}% -- {}!".format(
-            i["name"], i["sw1"], i["width"], i["avg_cong"], i["chg_5d"], i["chg_10d"], confirm))
+# 减仓/规避: S3/S6/S9 的趋势信号
+risk_trends = trend_groups.get("S3:", []) + trend_groups.get("S6:", []) + trend_groups.get("S9:", [])
+if risk_trends:
+    lines.append("  【减仓/规避 - 趋势信号】(★★★ 紧急)")
+    for i in risk_trends[:8]:
+        confirm = "[全周期跌]" if (i["chg_5d"] < 0 and i["chg_10d"] < 0 and i["chg_20d"] < 0) else ""
+        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% {}".format(
+            i["scene"].split(":")[0], i["name"], i["sw1"],
+            i["width"], i["avg_cong"], i["chg_5d"], confirm))
     lines.append("")
 
-if scene3:
-    other = [i for i in scene3 if i["signal_type"] != "趋势"]
-    if other:
-        lines.append("  【规避减仓 - 偶发信号】(需观察)")
-        for i in other[:3]:
-            lines.append("    * {}({}) 宽度{:.0f},拥挤{:.0f},价格5日{:+5.1f}% -- 建议关注".format(
-                i["name"], i["sw1"], i["width"], i["avg_cong"], i["chg_5d"]))
-        lines.append("")
-
-lines.append("  【观望】关注弱势磨底中宽度率先回升的板块")
+# 观望: S7/S8 的关注项
+watch_items = trend_groups.get("S8:", [])[:3] if not trend_groups.get("S7:", []) else []
+if watch_items or trend_groups.get("S7:", []):
+    watch_items = trend_groups.get("S7:", [])[:2] + trend_groups.get("S8:", [])[:3]
+    if watch_items:
+        lines.append("  【观望区关注】")
+        for i in watch_items:
+            lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{} 5日{:+.1f}% -- 密切跟踪".format(
+                i["scene"].split(":")[0], i["name"], i["sw1"],
+                i["width"], i["avg_cong"], i["chg_5d"]))
 
 # ---- 九、总结 ----
 lines.append("")
 lines.append("-" * 95)
-lines.append("九、分析框架速查表")
+lines.append("九、9场景矩阵速查")
 lines.append("-" * 95)
 lines.append("")
-lines.append("  组合              场景              操作        趋势验证")
-lines.append("  " + "-" * 75)
-lines.append("  低拥挤+高宽度     场景1:启动初期    做多/加仓   价格趋势向上确认")
-lines.append("  高拥挤+高宽度     场景2:主升中后段   持有/控仓   价格趋势转弱=减仓")
-lines.append("  高拥挤+低宽度     场景3:见顶信号    卖出/避险   全周期下跌=确认")
-lines.append("  低拥挤+低宽度     场景4:磨底观望    观望/等待   价格企稳=关注")
+lines.append("           拥挤<50       拥挤50~80     拥挤>=80")
+lines.append("         ┌─────────┬──────────┬─────────┐")
+lines.append("  宽度>=80│ S1 积极    │ S2 追多   │ S3 减仓  │")
+lines.append("  宽度50~80│ S4 吸纳    │ S5 等待   │ S6 撤离  │")
+lines.append("  宽度<50 │ S7 观望    │ S8 跟踪   │ S9 规避  │")
 lines.append("")
-lines.append("  ★趋势信号: 过去{}天一致在同场景 + 价格趋势同向，置信度高".format(HISTORY_DAYS))
-lines.append("  ○偶发信号: 今日刚进入该场景，需等待确认")
+lines.append("  ★趋势: 场景稳定+动能明确 | ☆偏稳: 有持续性但动能不足 | ○偶发: 刚进入需观察")
 lines.append("")
-lines.append("  当前市场状态: {}".format("强势市场" if avg_w >= 40 else "弱势市场,建议谨慎"))
-lines.append("  拥挤度状态: {}".format("资金抱团明显,注意高位风险" if avg_c >= 60 else "资金未集中,无明显板块泡沫"))
-lines.append("  行情趋势: 5日平均{:+.2f}%, 10日平均{:+.2f}%, 20日平均{:+.2f}%".format(avg_chg5, avg_chg10, avg_chg20))
+lines.append("  当前市场状态: {}".format(
+    "强势(宽>50)" if avg_w >= 50 else "中性(宽30~50)" if avg_w >= 30 else "弱势(宽<30)"))
+lines.append("  拥挤度状态: {}".format(
+    "高热(拥>80)" if avg_c >= C_HIGH else "适中(拥50~80)" if avg_c >= C_MID else "清淡(拥<50)"))
 lines.append("")
 lines.append("=" * 95)
 lines.append("  报告生成完毕")
