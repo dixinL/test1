@@ -19,6 +19,7 @@
 """
 
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -104,9 +105,9 @@ def generate_rss_html(report_path, rank_csv, width_img, congestion_img, output_p
     cong_img_rel = None
 
     if width_img and os.path.exists(width_img):
-        width_img_rel = "../{}".format(os.path.relpath(width_img, OUTPUT_DIR).replace("\\", "/"))
+        width_img_rel = os.path.relpath(width_img, OUTPUT_DIR).replace("\\", "/")
     if congestion_img and os.path.exists(congestion_img):
-        cong_img_rel = "../{}".format(os.path.relpath(congestion_img, OUTPUT_DIR).replace("\\", "/"))
+        cong_img_rel = os.path.relpath(congestion_img, OUTPUT_DIR).replace("\\", "/")
 
     # ---- 从报告中提取关键指标 ----
     market_status = ""
@@ -326,7 +327,7 @@ def send_wxpusher(report_path, data_date):
 
     # ====== 配置 ======
     WXPUSHER_APP_TOKEN = "AT_RIaNQJyOk7E1wBw8MaunfCp5wA51cFJa"
-    WXPUSHER_UIDS = ["UID_XLrkn2Or2zHTgGsEzR5gi8RCFkzD", "UID_T7HyOt7KWWhTtwsanVAJ0UDbG77O", "UID_svsRsMKanInF9hfJOHBbSvd4cPho"]
+    WXPUSHER_UIDS = ["UID_XLrkn2Or2zHTgGsEzR5gi8RCFkzD", "UID_T7HyOt7KWWhTtwsanVAJ0UDbG77O", "UID_svsRsMKanInF9hfJOHBbSvd4cPho", "UID_F8tW6XkunMiPNOSnsn6iVEKmBto6"]
     GITHUB_PAGES_URL = "https://dixinl.github.io/test1/output/daily_{}.html"
     MAX_CONTENT_BYTES = 30000       # WxPusher 上限 ~40000 字节, 留余量
     # ==================
@@ -360,28 +361,36 @@ def send_wxpusher(report_path, data_date):
 
     page_url = GITHUB_PAGES_URL.format(data_date)
 
-    # ---- 构建推送内容 (Markdown) - 只提取两个章节 ----
+    # ---- 构建推送内容 (Markdown) - 三个章节 ----
 
     # 定位章节边界
     sec1_start = None   # "一、市场总体状态"
     sec1_end = None     # "二、" 开头 (场景分布)
+    sec3_start = None   # "七、一级行业场景分布矩阵"
+    sec3_end = None     # "八、综合投资建议" (或下一个章节)
     sec2_start = None   # "八、综合投资建议"
     sec2_end = None     # "九、" 开头 (速查表/总结)
 
     for i, line in enumerate(all_lines):
         s = line.strip()
-        if s.startswith("一、") and ("市场总体" in s or "数据日期" in s):
+        # 兼容 Markdown: 去掉 heading 前缀 (## / #)
+        s_clean = re.sub(r'^#{1,3}\s*', '', s)
+        if s_clean.startswith("一、") and ("市场总体" in s_clean or "数据日期" in s_clean):
             sec1_start = i
-        elif s.startswith("二、") or s.startswith("二、"):
+        elif s_clean.startswith("二、") and "九场景" in s:
             if sec1_start is not None and sec1_end is None:
                 sec1_end = i
-        elif "八、综合投资建议" in s or ("八、" in s and "综合投资" in s):
+        elif "一级行业场景分布矩阵" in s and "趋势统计" in s:
+            sec3_start = i
+        elif ("八、" in s_clean and "综合投资" in s_clean) or "八、综合投资建议" in s_clean:
+            if sec3_start is not None and sec3_end is None:
+                sec3_end = i
             sec2_start = i
-        elif s.startswith("九、") or s.startswith("九、"):
+        elif s_clean.startswith("九、") and "场景矩阵" in s_clean:
             if sec2_start is not None and sec2_end is None:
                 sec2_end = i
 
-    # 提取两段内容
+    # 提取三段内容
     md_lines = []
     md_lines.append("# 申万二级行业日报 {}".format(data_date))
     md_lines.append("")
@@ -396,7 +405,14 @@ def send_wxpusher(report_path, data_date):
         md_lines.extend(all_lines[sec1_start:end])
         md_lines.append("")
 
-    # 第二段: 综合投资建议
+    # 第二段: 一级行业场景分布矩阵
+    if sec3_start is not None:
+        end = sec3_end if sec3_end else (sec2_start if sec2_start else len(all_lines))
+        md_lines.append("## 一级行业场景分布矩阵")
+        md_lines.extend(all_lines[sec3_start:end])
+        md_lines.append("")
+
+    # 第三段: 综合投资建议
     if sec2_start is not None:
         end = sec2_end if sec2_end else len(all_lines)
         md_lines.append("## 综合投资建议")

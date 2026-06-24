@@ -367,19 +367,17 @@ def get_width_change(w_data, code, offset, base_offset=0):
 
 
 def get_congestion_change(c_data, code, offset, base_offset=0):
-    """拥挤度N日变化量 (基准日 - N日前)，取换手率+成交额均值"""
+    """拥挤度N日变化量 (基准日 - N日前)，使用换手率分位数"""
     vals = c_data["congestions"].get(code, [])
 
-    def avg_cong(v):
+    def get_cong(v):
         if isinstance(v, dict):
-            t = v.get("turnoverRateFQuantile", 0) or 0
-            a = v.get("amountCongestionQuantile", 0) or 0
-            return (t + a) / 2
+            return v.get("turnoverRateFQuantile", 0) or 0
         return 0
 
-    now = avg_cong(vals[base_offset]) if base_offset < len(vals) else 0
+    now = get_cong(vals[base_offset]) if base_offset < len(vals) else 0
     then_idx = base_offset + offset
-    then = avg_cong(vals[then_idx]) if then_idx < len(vals) else 0
+    then = get_cong(vals[then_idx]) if then_idx < len(vals) else 0
     return (now - then)
 
 
@@ -412,14 +410,12 @@ def calc_width_score(w_data, code, base_offset=0):
 
 
 def calc_congestion_score(c_data, code, base_offset=0):
-    """拥挤度趋势得分: 高拥挤下降=好, 低拥挤上升=好, 中等趋近50=好"""
+    """拥挤度趋势得分: 高拥挤下降=好, 低拥挤上升=好, 中等趋近50=好 (使用换手率分位数)"""
     vals = c_data["congestions"].get(code, [])
     if not vals or base_offset >= len(vals) or not isinstance(vals[base_offset], dict):
         return 0
 
-    t0 = vals[base_offset].get("turnoverRateFQuantile", 0) or 0
-    a0 = vals[base_offset].get("amountCongestionQuantile", 0) or 0
-    cur_cong = (t0 + a0) / 2
+    cur_cong = vals[base_offset].get("turnoverRateFQuantile", 0) or 0
 
     raw = 0
     for w_i, offset in zip(T_WEIGHTS, T_OFFSETS):

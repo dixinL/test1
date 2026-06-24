@@ -1096,23 +1096,25 @@ for ind in industries:
         sw1_trend_count[sw1]["sporadic"] += 1
 
 # ============================================================
-# 8. 生成报告
+# 8. 生成报告 (Markdown 格式)
 # ============================================================
-lines = []
-lines.append("=" * 95)
-lines.append("  申万二级行业可操作分析报告 (增强版 v2)")
-lines.append("  基于: 行业拥挤度 + 市场宽度 + 行情趋势 叠加分析")
-lines.append("  参考历史{}日 + 3/5/10/20日涨跌幅趋势".format(HISTORY_DAYS))
-lines.append("=" * 95)
-lines.append("")
-lines.append("报告日期: {}    数据截止: {}    参考历史: {}天".format(
+md = []  # markdown lines
+
+# ---- 标题 ----
+md.append("# 申万二级行业可操作分析报告 (增强版 v2)")
+md.append("")
+md.append("> 基于: 行业拥挤度 + 市场宽度 + 行情趋势 叠加分析  ")
+md.append("> 参考历史{}日 + 3/5/10/20日涨跌幅趋势".format(HISTORY_DAYS))
+md.append("")
+md.append("报告日期: {} | 数据截止: {} | 参考历史: {}天".format(
     datetime.now().strftime("%Y-%m-%d"), latest_date, HISTORY_DAYS))
-lines.append("")
+md.append("")
+md.append("---")
+md.append("")
 
 # ---- 一、市场总体状态 ----
-lines.append("-" * 95)
-lines.append("一、市场总体状态")
-lines.append("-" * 95)
+md.append("## 一、市场总体状态")
+md.append("")
 valid = industries
 total = len(valid)
 
@@ -1127,35 +1129,41 @@ trend_status = "上升" if avg_w_trend > 2 else "下降" if avg_w_trend < -2 els
 cong_status = "高热" if avg_c >= C_HIGH else "适中" if avg_c >= C_MID else "清淡"
 cong_trend_status = "升温" if avg_c_trend > 1 else "降温" if avg_c_trend < -1 else "平稳"
 
-lines.append("")
-lines.append("  【市场宽度】")
-lines.append("    均值: {:.1f}  状态: {}  趋势: {} ({:+.1f}/天)".format(avg_w, market_status, trend_status, avg_w_trend))
-lines.append("    高(>=80): {} 个  中(50~80): {} 个  低(<50): {} 个".format(
+md.append("### 市场宽度")
+md.append("")
+md.append("- 均值: {:.1f} | 状态: **{}** | 趋势: {} ({:+.1f}/天)".format(avg_w, market_status, trend_status, avg_w_trend))
+md.append("- 高(>=80): {} 个 | 中(50~80): {} 个 | 低(<50): {} 个".format(
     len([i for i in valid if i["width"] >= W_HIGH]),
     len([i for i in valid if W_MID <= i["width"] < W_HIGH]),
     len([i for i in valid if i["width"] < W_MID])))
-lines.append("")
-lines.append("  【市场拥挤度】")
-lines.append("    均值: {:.1f}  状态: {}  趋势: {} ({:+.2f}/天)".format(avg_c, cong_status, cong_trend_status, avg_c_trend))
-lines.append("    高(>=80): {} 个  中(50~80): {} 个  低(<50): {} 个".format(
+md.append("")
+
+md.append("### 市场拥挤度")
+md.append("")
+md.append("- 拥挤度均值: {:.1f} | 状态: **{}** | 趋势: {} ({:+.2f}/天)".format(avg_c, cong_status, cong_trend_status, avg_c_trend))
+md.append("- 高(>=80): {} 个 | 中(50~80): {} 个 | 低(<50): {} 个".format(
     len([i for i in valid if i["avg_cong"] >= C_HIGH]),
     len([i for i in valid if C_MID <= i["avg_cong"] < C_HIGH]),
     len([i for i in valid if i["avg_cong"] < C_MID])))
-lines.append("")
-lines.append("  【行情趋势】(来自行情CSV)")
+md.append("")
+
+md.append("### 行情趋势 (来自行情CSV)")
+md.append("")
 avg_chg5 = sum(i["chg_5d"] for i in valid) / total if total else 0
 avg_chg10 = sum(i["chg_10d"] for i in valid) / total if total else 0
 avg_chg20 = sum(i["chg_20d"] for i in valid) / total if total else 0
-lines.append("    5日平均: {:+.2f}%    10日平均: {:+.2f}%    20日平均: {:+.2f}%".format(avg_chg5, avg_chg10, avg_chg20))
+md.append("- 5日平均: {:+.2f}% | 10日平均: {:+.2f}% | 20日平均: {:+.2f}%".format(avg_chg5, avg_chg10, avg_chg20))
 price_up5 = len([i for i in valid if i["chg_5d"] > 0])
 price_up10 = len([i for i in valid if i["chg_10d"] > 0])
-lines.append("    5日上涨: {} 个    10日上涨: {} 个".format(price_up5, price_up10))
-lines.append("")
-lines.append("  【信号类型统计】")
+md.append("- 5日上涨: {} 个 | 10日上涨: {} 个".format(price_up5, price_up10))
+md.append("")
+
+md.append("### 信号类型统计")
+md.append("")
 trend_cnt = len([i for i in valid if i["signal_type"] == "趋势"])
 stable_cnt = len([i for i in valid if "偏稳" in i.get("signal_type", "")])
 sporadic_cnt = len([i for i in valid if i["signal_type"] == "偶发"])
-lines.append("    ★趋势: {} 个    ☆偏稳: {} 个    ○偶发: {} 个  (合计: {} 个)".format(
+md.append("- ★趋势: {} 个 | ☆偏稳: {} 个 | ○偶发: {} 个 (合计: {} 个)".format(
     trend_cnt, stable_cnt, sporadic_cnt, trend_cnt + stable_cnt + sporadic_cnt))
 
 # 偏稳子类型细分
@@ -1168,10 +1176,12 @@ if stable_cnt > 0:
     if stable_types:
         sorted_stable = sorted(stable_types.items(), key=lambda x: -x[1])
         detail = "  ".join(["{}:{}".format(k, v) for k, v in sorted_stable])
-        lines.append("    [☆偏稳细分] {}".format(detail))
-lines.append("")
-lines.append("  【当前市场判断】")
-lines.append("    {} + {} = {}".format(
+        md.append("- ☆偏稳细分: {}".format(detail))
+md.append("")
+
+md.append("### 当前市场判断")
+md.append("")
+md.append("- {} + {} = **{}**".format(
     "宽度极弱" if avg_w < 20 else "宽度弱势" if avg_w < 40 else "宽度中性" if avg_w < 60 else "宽度强势",
     "高拥挤" if avg_c >= 60 else "低拥挤",
     "弱势磨底" if avg_w < 40 and avg_c < 60 else
@@ -1179,15 +1189,14 @@ lines.append("    {} + {} = {}".format(
     "主升行情" if avg_w >= 40 and avg_c >= 60 else
     "启动初期"))
 
-# ---- 二、9场景分布 ----
-lines.append("")
-lines.append("-" * 95)
-lines.append("二、九场景矩阵 (共 {} 个有效行业)".format(len(valid)))
-lines.append("-" * 95)
-lines.append("")
-lines.append("  {:^16} {:>4} {:>4} {:>4} {:>6}  {}".format(
-    "场景", "总数", "★趋势", "☆偏稳", "置信度", "[☆偏稳细分]"))
-lines.append("  " + "-" * 80)
+md.append("")
+md.append("---")
+md.append("")
+md.append("## 二、九场景矩阵 (共 {} 个有效行业)".format(len(valid)))
+md.append("")
+
+md.append("| 场景 | 总数 | ★趋势 | ☆偏稳 | 置信度 | ☆偏稳细分 |")
+md.append("|------|------|-------|-------|--------|-----------|")
 
 # S1-S9 按行输出
 for sk in SCENE_KEYS:
@@ -1207,12 +1216,13 @@ for sk in SCENE_KEYS:
         detail_parts = ["{}{}".format(k, v) for k, v in sorted_sub]
         stable_detail = " ".join(detail_parts)
 
-    lines.append("  {:^16} {:>4} {:>4} {:>4} {:>6.0f}  {}".format(
-        slist[0]["scene"] if slist else sk.replace(":", ""), len(slist), len(tlist), len(stable_list), avg_conf, stable_detail))
+    scene_name = slist[0]["scene"] if slist else sk.replace(":", "")
+    md.append("| {} | {} | {} | {} | {:.0f} | {} |".format(
+        scene_name, len(slist), len(tlist), len(stable_list), avg_conf, stable_detail))
 
 # 数据缺失行
 if scene_missing:
-    lines.append("  {:^16} {:>4}".format("⚠ 数据缺失", len(scene_missing)))
+    md.append("| ⚠ 数据缺失 | {} | - | - | - | - |".format(len(scene_missing)))
     missing_w0 = sum(1 for i in scene_missing if i.get("width", 0) == 0)
     missing_c_none = sum(1 for i in scene_missing if i.get("avg_cong") is None or i.get("avg_cong") == 0)
     reasons = []
@@ -1220,49 +1230,48 @@ if scene_missing:
         reasons.append("宽度=0:{}".format(missing_w0))
     if missing_c_none > 0:
         reasons.append("拥挤度空:{}".format(missing_c_none))
-    lines.append("  {:^16} {}".format("", " | ".join(reasons)))
+    if reasons:
+        md.append("| | | | | | {} |".format(" | ".join(reasons)))
 
-# 校验行
+# 合计行
 scene_total = sum(len(scene_groups.get(sk, [])) for sk in SCENE_KEYS) + len(scene_missing)
+md.append("| **合计** | **{}** | | | | |".format(scene_total))
 if scene_total != total:
-    lines.append("  {:^16} {:>4} (校验: 场景{} + 缺失{} = {} vs 总数{})".format(
-        "合计", scene_total, scene_total - len(scene_missing), len(scene_missing), scene_total, total))
-else:
-    lines.append("  {:^16} {:>4}".format("合计", scene_total))
-    if scene_missing:
-        missing_w0 = sum(1 for i in scene_missing if i.get("width", 0) == 0)
-        missing_c_none = sum(1 for i in scene_missing if i.get("avg_cong") is None or i.get("avg_cong") == 0)
-        reasons = []
-        if missing_w0 > 0:
-            reasons.append("宽度=0:{}".format(missing_w0))
-        if missing_c_none > 0:
-            reasons.append("拥挤度空:{}".format(missing_c_none))
-        if reasons:
-            lines.append("  {:^16} {}".format("", " | ".join(reasons)))
+    md.append("")
+    md.append("> ⚠ 校验: 场景{} + 缺失{} = {} vs 总数{}".format(
+        scene_total - len(scene_missing), len(scene_missing), scene_total, total))
 
-lines.append("")
-lines.append("  [9场景矩阵速查]")
-lines.append("           拥挤<50        拥挤50~80      拥挤>=80")
-lines.append("         ┌─────────┬──────────┬─────────┐")
-lines.append("  宽度>=80│ S1 强势   │ S2 加速   │ S3 极端  │  积极→追多→逢高减仓")
-lines.append("  宽度50~80│ S4 回暖   │ S5 盘整   │ S6 警惕  │  吸纳→等待→逐步撤离")
-lines.append("  宽度<50 │ S7 冰封   │ S8 探底   │ S9 出逃  │  观望→跟踪→坚决规避")
-lines.append("  [信号含义]")
-lines.append("  ★趋势: 场景稳定+动能明确，信号可靠")
-lines.append("  ☆偏稳: 有持续性但动能不足(按场景细分)")
-lines.append("  ○偶发: 今日刚进入该场景，需观察确认")
+md.append("")
+md.append("### 9场景矩阵速查")
+md.append("")
+md.append("```")
+md.append("          拥挤<50        拥挤50~80      拥挤>=80")
+md.append("        ┌─────────┬──────────┬─────────┐")
+md.append(" 宽度>=80│ S1 强势   │ S2 加速   │ S3 极端  │  积极→追多→逢高减仓")
+md.append(" 宽度50~80│ S4 回暖   │ S5 盘整   │ S6 警惕  │  吸纳→等待→逐步撤离")
+md.append(" 宽度<50 │ S7 冰封   │ S8 探底   │ S9 出逃  │  观望→跟踪→坚决规避")
+md.append("```")
+md.append("")
+md.append("### 信号含义")
+md.append("")
+md.append("- **★趋势**: 场景稳定+动能明确，信号可靠")
+md.append("- **☆偏稳**: 有持续性但动能不足 (按场景细分)")
+md.append("- **○偶发**: 今日刚进入该场景，需观察确认")
+md.append("")
 
 
 def print_scene_table(title, scene_list, trend_list, stable_list=None, max_rows=10, action_desc=""):
-    """打印场景详情表格（含行情趋势列）"""
+    """打印场景详情 Markdown 表格（含行情趋势列）"""
     if stable_list is None:
         stable_list = []
     sporadic_count = len(scene_list) - len(trend_list) - len(stable_list)
 
-    lines.append("")
-    lines.append("=" * 95)
-    lines.append("{} --> {} 个".format(title, len(scene_list)))
-    lines.append("    ★趋势: {} 个 | ☆偏稳: {} 个 | ○偶发: {} 个".format(
+    md.append("")
+    md.append("---")
+    md.append("")
+    md.append("## {} ({})".format(title, len(scene_list)))
+    md.append("")
+    md.append("- ★趋势: {} 个 | ☆偏稳: {} 个 | ○偶发: {} 个".format(
         len(trend_list), len(stable_list), sporadic_count))
     if stable_list:
         sub_counts = {}
@@ -1271,27 +1280,25 @@ def print_scene_table(title, scene_list, trend_list, stable_list=None, max_rows=
             sub_counts[st] = sub_counts.get(st, 0) + 1
         sorted_sub = sorted(sub_counts.items(), key=lambda x: -x[1])
         detail_parts = ["{}{}".format(k, v) for k, v in sorted_sub]
-        lines.append("    [☆偏稳细分] {}".format("  ".join(detail_parts)))
-    lines.append("=" * 95)
+        md.append("- ☆偏稳细分: {}".format("  ".join(detail_parts)))
+    md.append("- 操作: **{}**".format(action_desc))
+    md.append("")
     if not scene_list:
-        lines.append("  (当前无)")
+        md.append("*(当前无)*")
+        md.append("")
         return
-    lines.append("")
-    lines.append("  操作: {}".format(action_desc))
-    lines.append("")
-    lines.append("  {:<14} {:<11} {:<8} {:>6} {:>6} {:>5} {:>5} {:>7} {:>7} {:>7} {:>7} {}".format(
-        "信号", "一级行业", "二级行业", "宽度", "拥挤", "宽信", "拥信", "3日%", "5日%", "10日%", "20日%", "价格趋势"))
-    lines.append("  " + "-" * 106)
+
+    md.append("| 信号 | 一级行业 | 二级行业 | 宽度 | 拥挤 | 宽信 | 拥信 | 3日% | 5日% | 10日% | 20日% | 价格趋势 |")
+    md.append("|------|----------|----------|------|------|------|------|------|------|-------|-------|----------|")
     for i in scene_list[:max_rows]:
-        # 信号列: 图标 + 子类型文本 (如 ☆偏稳(高位))
         sig_display = "{}{}".format(i["signal_mark"], i.get("signal_type", ""))
-        lines.append("  {:<14} {:<11} {:<8} {:>6.0f} {:>6.0f} {:>5.0f} {:>5.0f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {:>+7.1f} {}".format(
+        md.append("| {} | {} | {} | {:.0f} | {:.0f} | {:.0f} | {:.0f} | {:+.1f} | {:+.1f} | {:+.1f} | {:+.1f} | {} |".format(
             sig_display, i["sw1"][:11], i["name"][:8],
             i["width"], i["avg_cong"],
             i.get("width_conf", 0), i.get("cong_conf", 0),
             i["chg_3d"], i["chg_5d"], i["chg_10d"], i["chg_20d"],
             i["price_trend"]))
-
+    md.append("")
 
 
 SCENE_TITLES = {
@@ -1325,115 +1332,123 @@ for sk in SCENE_KEYS:
                       max_rows=len(scene_groups.get(sk, [])),
                       action_desc=SCENE_ACTION_DESC.get(sk, ""))
 
-# ---- 七、一级行业全景 ----
-lines.append("")
-lines.append("=" * 95)
-lines.append("七、一级行业场景分布矩阵 (含趋势统计)")
-lines.append("=" * 95)
-lines.append("")
-lines.append("  {:<12} {:>4} {:>4} {:>4} {:>4} {:>6}  {}  {}".format(
-    "一级行业", "S1", "S2", "S3", "S4", "总数", "主导场景", "趋势/偶发"))
-lines.append("  " + "-" * 70)
+md.append("")
+md.append("---")
+md.append("")
+md.append("## 七、一级行业场景分布矩阵 (含趋势统计)")
+md.append("")
+
+md.append("| 一级行业 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | 总数 | 主导 | 趋势/偶发 |")
+md.append("|----------|----|----|----|----|----|----|----|----|----|------|------|-----------|")
 for sw1 in sorted(sw1_scene_count.keys(), key=lambda x: -sum(sw1_scene_count[x].values())):
     cnt = sw1_scene_count[sw1]
     total_sw1 = sum(cnt.values())
-    # 一级行业: 显示主导Sx场景和各Sx计数
-    sorted_scenes = sorted(sw1_scene_count[sw1].items(), key=lambda x: -x[1])
-    dominant = sorted_scenes[0][0] if sorted_scenes else "?"
-    dom_label = dominant.replace(":", "") if dominant else "-"
+    # 一级行业: 显示主导Sx场景和各Sx计数（固定S1-S9顺序）
+    dominant = max(cnt.items(), key=lambda x: x[1])
+    dom_key = dominant[0] if dominant else "?"
+    dom_label = dom_key.replace(":", "") if dom_key else "-"
     t = sw1_trend_count[sw1]
-    cols = "  ".join(["{:>3}".format(v) for k, v in sorted_scenes if k.startswith("S")])
-    lines.append("  {:<12} {} {:>6}  {}/{}".format(
+    # 固定 S1-S9 顺序输出各场景计数
+    s_vals = [cnt.get(sk, 0) for sk in SCENE_KEYS]
+    cols = "|".join([" {:>2}".format(v) for v in s_vals])
+    md.append("| {} |{} | {:>4} | {:>4} | {}/{} |".format(
         sw1[:12], cols, total_sw1, dom_label, t["trend"], t["sporadic"]))
 
 # ---- 八、综合投资建议 ----
-lines.append("")
-lines.append("=" * 95)
-lines.append("八、综合投资建议 (趋势信号优先 + 价格趋势验证)")
-lines.append("=" * 95)
-lines.append("")
+md.append("")
+md.append("---")
+md.append("")
+md.append("## 八、综合投资建议 (趋势信号优先 + 价格趋势验证)")
+md.append("")
 
 # 做多方向: S1 + S4 的趋势信号
 buy_trends = trend_groups.get("S1:", []) + trend_groups.get("S4:", [])
 if buy_trends:
-    lines.append("  【做多方向 - 趋势信号】(★★★ 可靠)")
+    md.append("### 做多方向 - 趋势信号 (★★★ 可靠)")
+    md.append("")
     for i in buy_trends[:5]:
-        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% 10日{:+.1f}%".format(
+        md.append("- **[{}]** {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% 10日{:+.1f}%".format(
             i["scene"].split(":")[0], i["name"], i["sw1"],
             i["width"], i["avg_cong"], i["chg_5d"], i["chg_10d"]))
-    lines.append("")
+    md.append("")
     # S1/S4 偏稳
     buy_stable = stable_groups.get("S1:", []) + stable_groups.get("S4:", [])
     if buy_stable:
-        lines.append("  【做多/回暖 - 偏稳信号】(观察确认)")
+        md.append("### 做多/回暖 - 偏稳信号 (观察确认)")
+        md.append("")
         for i in buy_stable[:3]:
-            lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} -- 观察确认".format(
+            md.append("- **[{}]** {}({}) 宽度{:.0f} 拥挤{:.0f} -- 观察确认".format(
                 i["scene"].split(":")[0], i["name"], i["sw1"], i["width"], i["avg_cong"]))
-        lines.append("")
+        md.append("")
 
 # 持有/追多: S2 的趋势信号
 hold_trends = trend_groups.get("S2:", [])
 if hold_trends:
-    lines.append("  【追多/持有 - 趋势信号】(★★ 控仓)")
+    md.append("### 追多/持有 - 趋势信号 (★★ 控仓)")
+    md.append("")
     for i in hold_trends[:3]:
         alert = " ⚠价格5日转负" if i["chg_5d"] < 0 else ""
-        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}%{}".format(
+        md.append("- **[{}]** {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}%{}".format(
             i["scene"].split(":")[0], i["name"], i["sw1"],
             i["width"], i["avg_cong"], i["chg_5d"], alert))
-    lines.append("")
+    md.append("")
 
 # 减仓/规避: S3/S6/S9 的趋势信号
 risk_trends = trend_groups.get("S3:", []) + trend_groups.get("S6:", []) + trend_groups.get("S9:", [])
 if risk_trends:
-    lines.append("  【减仓/规避 - 趋势信号】(★★★ 紧急)")
+    md.append("### 减仓/规避 - 趋势信号 (★★★ 紧急)")
+    md.append("")
     for i in risk_trends[:8]:
         confirm = "[全周期跌]" if (i["chg_5d"] < 0 and i["chg_10d"] < 0 and i["chg_20d"] < 0) else ""
-        lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% {}".format(
+        md.append("- **[{}]** {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% {}".format(
             i["scene"].split(":")[0], i["name"], i["sw1"],
             i["width"], i["avg_cong"], i["chg_5d"], confirm))
-    lines.append("")
+    md.append("")
 
 # 观望: S7/S8 的关注项
 watch_items = trend_groups.get("S8:", [])[:3] if not trend_groups.get("S7:", []) else []
 if watch_items or trend_groups.get("S7:", []):
     watch_items = trend_groups.get("S7:", [])[:2] + trend_groups.get("S8:", [])[:3]
     if watch_items:
-        lines.append("  【观望区关注】")
+        md.append("### 观望区关注")
+        md.append("")
         for i in watch_items:
-            lines.append("    * [{}] {}({}) 宽度{:.0f} 拥挤{} 5日{:+.1f}% -- 密切跟踪".format(
+            md.append("- **[{}]** {}({}) 宽度{:.0f} 拥挤{:.0f} 5日{:+.1f}% -- 密切跟踪".format(
                 i["scene"].split(":")[0], i["name"], i["sw1"],
                 i["width"], i["avg_cong"], i["chg_5d"]))
+        md.append("")
 
 # ---- 九、总结 ----
-lines.append("")
-lines.append("-" * 95)
-lines.append("九、9场景矩阵速查")
-lines.append("-" * 95)
-lines.append("")
-lines.append("           拥挤<50       拥挤50~80     拥挤>=80")
-lines.append("         ┌─────────┬──────────┬─────────┐")
-lines.append("  宽度>=80│ S1 积极    │ S2 追多   │ S3 减仓  │")
-lines.append("  宽度50~80│ S4 吸纳    │ S5 等待   │ S6 撤离  │")
-lines.append("  宽度<50 │ S7 观望    │ S8 跟踪   │ S9 规避  │")
-lines.append("")
-lines.append("  ★趋势: 场景稳定+动能明确 | ☆偏稳: 有持续性但动能不足 | ○偶发: 刚进入需观察")
-lines.append("")
-lines.append("  当前市场状态: {}".format(
+md.append("---")
+md.append("")
+md.append("## 九、9场景矩阵速查")
+md.append("")
+md.append("```")
+md.append("          拥挤<50       拥挤50~80     拥挤>=80")
+md.append("        ┌─────────┬──────────┬─────────┐")
+md.append(" 宽度>=80│ S1 积极    │ S2 追多   │ S3 减仓  │")
+md.append(" 宽度50~80│ S4 吸纳    │ S5 等待   │ S6 撤离  │")
+md.append(" 宽度<50 │ S7 观望    │ S8 跟踪   │ S9 规避  │")
+md.append("```")
+md.append("")
+md.append("- ★趋势: 场景稳定+动能明确 | ☆偏稳: 有持续性但动能不足 | ○偶发: 刚进入需观察")
+md.append("")
+md.append("- 当前市场状态: **{}**".format(
     "强势(宽>50)" if avg_w >= 50 else "中性(宽30~50)" if avg_w >= 30 else "弱势(宽<30)"))
-lines.append("  拥挤度状态: {}".format(
+md.append("- 拥挤度状态: **{}**".format(
     "高热(拥>80)" if avg_c >= C_HIGH else "适中(拥50~80)" if avg_c >= C_MID else "清淡(拥<50)"))
-lines.append("")
-lines.append("=" * 95)
-lines.append("  报告生成完毕")
-lines.append("=" * 95)
+md.append("")
+md.append("---")
+md.append("")
+md.append("*报告生成完毕*")
 
-report_text = "\n".join(lines)
+report_text = "\n".join(md)
 
-# 保存 -> report/ 文件夹，日期命名
+# 保存 -> report/ 文件夹，日期命名 (Markdown)
 REPORT_DIR = os.path.join(BASE_DIR, "report")
 os.makedirs(REPORT_DIR, exist_ok=True)
 today_str = datetime.now().strftime("%Y-%m-%d")
-output_path = os.path.join(REPORT_DIR, "action_report_{}.txt".format(today_str))
+output_path = os.path.join(REPORT_DIR, "action_report_{}.md".format(today_str))
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(report_text)
 
