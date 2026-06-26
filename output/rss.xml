@@ -5,14 +5,14 @@
     <link>https://dixinl.github.io/test1/output/</link>
     <description>每日自动生成申万二级行业分析报告：市场宽度、行业拥挤度、场景判断、综合排名</description>
     <language>zh-CN</language>
-    <lastBuildDate>Fri, 26 Jun 2026 02:54:45 +0800</lastBuildDate>
+    <lastBuildDate>Fri, 26 Jun 2026 22:18:20 +0800</lastBuildDate>
     <atom:link href="https://dixinl.github.io/test1/output/rss.xml" rel="self" type="application/rss+xml"/>
     <item>
       <title>申万二级行业日报 - 2026-06-26</title>
       <link>https://dixinl.github.io/test1/output/daily_2026-06-26.html</link>
-      <description><![CDATA[### 当前市场判断 - 宽度弱势 + 低拥挤 = **弱势磨底**
-市场宽度: - 拥挤度均值: 49.2 | 状态: **清淡** | 趋势: 平稳 (-0.79/天)
-行业拥挤度: - 拥挤度均值: 49.2 | 状态: **清淡** | 趋势: 平稳 (-0.79/天)
+      <description><![CDATA[### 当前市场判断 - 宽度极弱 + 低拥挤 = **弱势磨底**
+市场宽度: - 拥挤度均值: 48.5 | 状态: **清淡** | 趋势: 平稳 (+0.06/天)
+行业拥挤度: - 拥挤度均值: 48.5 | 状态: **清淡** | 趋势: 平稳 (+0.06/天)
 信号统计: -
 有效行业: 131 个]]></description>
       <pubDate>2026-06-26T08:00:00+08:00</pubDate>
