@@ -28,9 +28,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
 
-def run_script(script_name, args=None, label=""):
+def run_script(script_name, args=None, label="", timeout=300):
     """
     运行子脚本并返回 (success, stdout, stderr)
+    实时流式输出，防止 GitHub Actions 超时看不到日志
     """
     cmd = [sys.executable, os.path.join(BASE_DIR, script_name)]
     if args:
@@ -38,28 +39,37 @@ def run_script(script_name, args=None, label=""):
 
     print("\n" + "=" * 60)
     print("  [{}] python {}".format(label or script_name, " ".join(cmd[2:])))
+    print("  [{}] 开始时间: {}".format(label or script_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    print("  [{}] 超时设置: {}s".format(label or script_name, timeout))
     print("=" * 60)
+    sys.stdout.flush()
 
-    result = subprocess.run(
-        cmd,
-        cwd=BASE_DIR,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace"
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=BASE_DIR,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout
+        )
 
-    # 打印关键输出(最后20行)
-    if result.stdout:
-        lines = result.stdout.strip().split("\n")
-        for line in lines[-20:]:
-            print("  | {}".format(line))
+        print("\n" + "-" * 60)
+        print("  [{}] 完成时间: {}".format(label or script_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        print("  [{}] 返回码: {}".format(label or script_name, result.returncode))
+        print("-" * 60)
+        sys.stdout.flush()
 
-    if result.returncode != 0 and result.stderr:
-        err_lines = result.stderr.strip().split("\n")
-        print("  [ERROR] {}".format(err_lines[-5] if err_lines else "unknown"))
-
-    return result.returncode == 0, result.stdout, result.stderr
+        return result.returncode == 0, "", ""
+    except subprocess.TimeoutExpired:
+        print("\n" + "-" * 60)
+        print("  [{}] TIMEOUT! 超过 {} 秒".format(label or script_name, timeout))
+        print("  [{}] 超时时间: {}".format(label or script_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        print("-" * 60)
+        sys.stdout.flush()
+        return False, "", "Timeout after {}s".format(timeout)
 
 
 def find_latest_file(directory, pattern):
@@ -319,47 +329,105 @@ def main():
       1. 生成报告 (action_report.py)
       2. 生成热力图 (draw_heatmap.py width + congestion)
       3. 生成排名 (sw2_score_rank.py)
-      4. 整合为 RSS HTML
+      4. 收集产物路径
+      5. 整合为 RSS HTML
     """
     start_time = datetime.now()
     print("=" * 65)
     print("   [*] 申万二级行业每日统一调度")
     print("   开始时间: {}".format(start_time.strftime("%Y-%m-%d %H:%M:%S")))
     print("=" * 65)
+    sys.stdout.flush()
 
     # 解析参数
     no_image = "--no-image" in sys.argv
     no_rank = "--no-rank" in sys.argv
     no_report = "--no-report" in sys.argv
+    print("   参数: no_image={}, no_rank={}, no_report={}".format(no_image, no_rank, no_report))
+    sys.stdout.flush()
 
     results = {}
     errors = []
 
     # ---- Step 1: 生成分析报告 ----
     if not no_report:
+        print("\n" + "#" * 65)
+        print("# Step 1/5: 生成分析报告 (action_report.py)")
+        print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        print("#" * 65)
+        sys.stdout.flush()
+
         ok, _, _ = run_script("action_report.py", label="分析报告")
         results["report"] = ok
+        print("   [Step 1] 分析报告: {} (用时: {:.1f}s)".format(
+            "成功" if ok else "失败",
+            (datetime.now() - start_time).total_seconds()
+        ))
+        sys.stdout.flush()
         if not ok:
             errors.append("action_report 失败")
+    else:
+        print("   [Step 1] 跳过分析报告 (--no-report)")
+        sys.stdout.flush()
 
     # ---- Step 2: 生成热力图 ----
+    step_start = datetime.now()
     if not no_image:
+        print("\n" + "#" * 65)
+        print("# Step 2/5: 生成热力图 (draw_heatmap.py)")
+        print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        print("#" * 65)
+        sys.stdout.flush()
+
         ok_w, _, _ = run_script("draw_heatmap.py", ["width"], label="宽度热力图")
         ok_c, _, _ = run_script("draw_heatmap.py", ["congestion"], label="拥挤度热力图")
         results["heatmap"] = ok_w and ok_c
+        step_elapsed = (datetime.now() - step_start).total_seconds()
+        print("   [Step 2] 宽度热力图: {}, 拥挤度热力图: {} (用时: {:.1f}s)".format(
+            "成功" if ok_w else "失败",
+            "成功" if ok_c else "失败",
+            step_elapsed
+        ))
+        sys.stdout.flush()
         if not ok_w:
             errors.append("width heatmap 失败")
         if not ok_c:
             errors.append("congestion heatmap 失败")
+    else:
+        print("   [Step 2] 跳过热力图 (--no-image)")
+        sys.stdout.flush()
 
     # ---- Step 3: 生成排名数据 ----
+    step_start = datetime.now()
     if not no_rank:
+        print("\n" + "#" * 65)
+        print("# Step 3/5: 生成排名数据 (sw2_score_rank.py)")
+        print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        print("#" * 65)
+        sys.stdout.flush()
+
         ok, _, _ = run_script("sw2_score_rank.py", label="评分排名")
         results["rank"] = ok
+        step_elapsed = (datetime.now() - step_start).total_seconds()
+        print("   [Step 3] 评分排名: {} (用时: {:.1f}s)".format(
+            "成功" if ok else "失败",
+            step_elapsed
+        ))
+        sys.stdout.flush()
         if not ok:
             errors.append("score rank 失败")
+    else:
+        print("   [Step 3] 跳过排名数据 (--no-rank)")
+        sys.stdout.flush()
 
     # ---- Step 4: 收集产物路径 ----
+    step_start = datetime.now()
+    print("\n" + "#" * 65)
+    print("# Step 4/5: 收集产物路径")
+    print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    print("#" * 65)
+    sys.stdout.flush()
+
     today_str = date.today().strftime("%Y-%m-%d")
 
     report_path = find_latest_file(os.path.join(BASE_DIR, "report"), "action_report_")
@@ -367,20 +435,33 @@ def main():
     width_img = find_latest_file(os.path.join(BASE_DIR, "width"), "_heatmap.png")
     cong_img = find_latest_file(os.path.join(BASE_DIR, "congestion"), "_heatmap.png")
 
-    # 提取实际数据日期
+    print("   [Step 4] 报告路径: {}".format(report_path or "未找到"))
+    print("   [Step 4] 排名路径: {}".format(rank_csv or "未找到"))
+    print("   [Step 4] 宽度图: {}".format(width_img or "未找到"))
+    print("   [Step 4] 拥挤度图: {}".format(cong_img or "未找到"))
+    sys.stdout.flush()
+
     data_date = today_str
     if report_path:
         import re
         m = re.search(r'(\d{4}-\d{2}-\d{2})', os.path.basename(report_path))
         if m:
             data_date = m.group(1)
+    print("   [Step 4] 数据日期: {}".format(data_date))
+    sys.stdout.flush()
 
     output_path = os.path.join(OUTPUT_DIR, "daily_{}.html".format(data_date))
+    step_elapsed = (datetime.now() - step_start).total_seconds()
+    print("   [Step 4] 完成 (用时: {:.1f}s)".format(step_elapsed))
+    sys.stdout.flush()
 
     # ---- Step 5: 生成 RSS HTML ----
-    print("\n" + "=" * 60)
-    print("  [5/5] 生成整合文件...")
-    print("=" * 60)
+    step_start = datetime.now()
+    print("\n" + "#" * 65)
+    print("# Step 5/5: 生成 RSS HTML")
+    print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    print("#" * 65)
+    sys.stdout.flush()
 
     ok = generate_rss_html(
         report_path=report_path,
@@ -391,24 +472,30 @@ def main():
         data_date=data_date,
     )
     results["rss_html"] = ok
+    step_elapsed = (datetime.now() - step_start).total_seconds()
+    print("   [Step 5] 生成 RSS HTML: {} (用时: {:.1f}s)".format(
+        "成功" if ok else "失败",
+        step_elapsed
+    ))
+    sys.stdout.flush()
 
     # ---- 总结 ----
     elapsed = (datetime.now() - start_time).total_seconds()
     print("\n" + "=" * 65)
-    print("   [*] 完成! 用时 {:.1f}s".format(elapsed))
+    print("   [*] 完成! 总用时: {:.1f}s".format(elapsed))
     print("-" * 65)
-    status_icon = "[*]" if all(results.values()) else "[*][*]"
+    status_icon = "[OK]" if all(results.values()) else "[FAIL]"
     print("   {} 报告: {} | 热力图: {} | 排名: {} | 整合: {}".format(
         status_icon,
-        "[*]" if results.get("report", True) else "[*]",
-        "[*]" if results.get("heatmap", True) else "[*]",
-        "[*]" if results.get("rank", True) else "[*]",
-        "[*]" if results.get("rss_html", False) else "[*]",
+        "[OK]" if results.get("report", True) else "[FAIL]",
+        "[OK]" if results.get("heatmap", True) else "[FAIL]",
+        "[OK]" if results.get("rank", True) else "[FAIL]",
+        "[OK]" if results.get("rss_html", False) else "[FAIL]",
     ))
     print("-" * 65)
     if errors:
-        print("   [*][*] 错误: {}".format(", ".join(errors)))
-    print("   [*] 输出:")
+        print("   [ERROR] 错误列表: {}".format(", ".join(errors)))
+    print("   [*] 输出文件:")
     if report_path:
         print("       报告: {}".format(report_path))
     if rank_csv:
