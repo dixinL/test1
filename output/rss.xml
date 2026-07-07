@@ -5,8 +5,19 @@
     <link>https://dixinl.github.io/test1/output/</link>
     <description>每日自动生成申万二级行业分析报告：市场宽度、行业拥挤度、场景判断、综合排名</description>
     <language>zh-CN</language>
-    <lastBuildDate>Tue, 07 Jul 2026 20:57:25 +0800</lastBuildDate>
+    <lastBuildDate>Wed, 08 Jul 2026 06:14:45 +0800</lastBuildDate>
     <atom:link href="https://dixinl.github.io/test1/output/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>申万二级行业日报 - 2026-07-08</title>
+      <link>https://dixinl.github.io/test1/output/daily_2026-07-08.html</link>
+      <description><![CDATA[### 当前市场判断 - 宽度弱势 + 低拥挤 = **弱势磨底**
+市场宽度: - 拥挤度均值: 45.8 | 状态: **清淡** | 趋势: 降温 (-1.04/天)
+行业拥挤度: - 拥挤度均值: 45.8 | 状态: **清淡** | 趋势: 降温 (-1.04/天)
+信号统计: -
+有效行业: 131 个]]></description>
+      <pubDate>2026-07-08T06:14:45+08:00</pubDate>
+      <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-08.html</guid>
+    </item>
     <item>
       <title>申万二级行业日报 - 2026-07-07</title>
       <link>https://dixinl.github.io/test1/output/daily_2026-07-07.html</link>
@@ -15,7 +26,7 @@
 行业拥挤度: - 拥挤度均值: 45.8 | 状态: **清淡** | 趋势: 平稳 (-0.65/天)
 信号统计: -
 有效行业: 0 个]]></description>
-      <pubDate>2026-07-07T20:57:25+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-07.html</guid>
     </item>
     <item>
@@ -26,7 +37,7 @@
 行业拥挤度: - 拥挤度均值: 49.0 | 状态: **清淡** | 趋势: 平稳 (-0.65/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-06.html</guid>
     </item>
     <item>
@@ -37,7 +48,7 @@
 行业拥挤度: - 拥挤度均值: 50.5 | 状态: **适中** | 趋势: 平稳 (+0.59/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-03.html</guid>
     </item>
     <item>
@@ -48,7 +59,7 @@
 行业拥挤度: - 拥挤度均值: 50.5 | 状态: **适中** | 趋势: 平稳 (+0.59/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-02.html</guid>
     </item>
     <item>
@@ -59,7 +70,7 @@
 行业拥挤度: - 拥挤度均值: 50.9 | 状态: **适中** | 趋势: 平稳 (-0.63/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-01.html</guid>
     </item>
     <item>
@@ -70,7 +81,7 @@
 行业拥挤度: - 拥挤度均值: 50.3 | 状态: **适中** | 趋势: 平稳 (+0.59/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-29.html</guid>
     </item>
     <item>
@@ -81,7 +92,7 @@
 行业拥挤度: - 拥挤度均值: 48.5 | 状态: **清淡** | 趋势: 平稳 (+0.06/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-28.html</guid>
     </item>
     <item>
@@ -92,7 +103,7 @@
 行业拥挤度: - 拥挤度均值: 48.5 | 状态: **清淡** | 趋势: 平稳 (+0.06/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-27.html</guid>
     </item>
     <item>
@@ -103,7 +114,7 @@
 行业拥挤度: - 拥挤度均值: 48.5 | 状态: **清淡** | 趋势: 平稳 (+0.06/天)
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-26.html</guid>
     </item>
     <item>
@@ -114,7 +125,7 @@
 行业拥挤度: -
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-24.html</guid>
     </item>
     <item>
@@ -125,7 +136,7 @@
 行业拥挤度: -
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-23.html</guid>
     </item>
     <item>
@@ -136,7 +147,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-22.html</guid>
     </item>
     <item>
@@ -147,7 +158,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-21.html</guid>
     </item>
     <item>
@@ -158,7 +169,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-20.html</guid>
     </item>
     <item>
@@ -169,7 +180,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-19.html</guid>
     </item>
     <item>
@@ -180,7 +191,7 @@
 行业拥挤度: -
 信号统计: -
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-18.html</guid>
     </item>
     <item>
@@ -191,7 +202,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-17.html</guid>
     </item>
     <item>
@@ -202,7 +213,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-16.html</guid>
     </item>
     <item>
@@ -213,7 +224,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-15.html</guid>
     </item>
     <item>
@@ -224,7 +235,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-14.html</guid>
     </item>
     <item>
@@ -235,7 +246,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-13.html</guid>
     </item>
     <item>
@@ -246,7 +257,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-12.html</guid>
     </item>
     <item>
@@ -257,7 +268,7 @@
 行业拥挤度: -
 信号统计: ★趋势信号: 过去7天一致在同场景 + 价格趋势同向，置信度高
 有效行业: 131 个]]></description>
-      <pubDate>2026-07-07T20:51:51+08:00</pubDate>
+      <pubDate>2026-07-08T06:10:51+08:00</pubDate>
       <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-06-11.html</guid>
     </item>
   </channel>
