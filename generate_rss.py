@@ -92,7 +92,9 @@ def generate_rss():
             latest_date = report_date
 
         url = "{}/output/{}".format(SITE_BASE, filename)
-        pub_date = "{}T08:00:00+08:00".format(report_date)  # 北京时间早8点
+        mtime = os.path.getmtime(filepath)
+        pub_datetime = datetime.fromtimestamp(mtime)
+        pub_date = pub_datetime.strftime("%Y-%m-%dT%H:%M:%S+08:00")
 
         item = """    <item>
       <title>{title}</title>
