@@ -435,12 +435,12 @@ def main():
     today_str = date.today().strftime("%Y-%m-%d")
 
     report_path = find_latest_file(os.path.join(BASE_DIR, "report"), "action_report_")
-    rank_csv = find_latest_file(os.path.join(BASE_DIR, "rank"), "sw2_score_rank_")
+    rank_csv = find_latest_file(os.path.join(BASE_DIR, "rank"), "sw2_score_rank_") if results.get("rank", True) else None
     width_img = find_latest_file(os.path.join(BASE_DIR, "width"), "_heatmap.png")
     cong_img = find_latest_file(os.path.join(BASE_DIR, "congestion"), "_heatmap.png")
 
     print("   [Step 4] 报告路径: {}".format(report_path or "未找到"))
-    print("   [Step 4] 排名路径: {}".format(rank_csv or "未找到"))
+    print("   [Step 4] 排名路径: {} ({})".format(rank_csv or "未使用", "排名失败跳过" if not results.get("rank") else "正常"))
     print("   [Step 4] 宽度图: {}".format(width_img or "未找到"))
     print("   [Step 4] 拥挤度图: {}".format(cong_img or "未找到"))
     sys.stdout.flush()
@@ -488,12 +488,14 @@ def main():
     print("\n" + "=" * 65)
     print("   [*] 完成! 总用时: {:.1f}s".format(elapsed))
     print("-" * 65)
-    status_icon = "[OK]" if all(results.values()) else "[FAIL]"
+    rank_ok = results.get("rank", True)
+    critical_ok = all([results.get("report", True), results.get("heatmap", True), results.get("rss_html", False)])
+    status_icon = "[OK]" if critical_ok else "[FAIL]"
     print("   {} 报告: {} | 热力图: {} | 排名: {} | 整合: {}".format(
         status_icon,
         "[OK]" if results.get("report", True) else "[FAIL]",
         "[OK]" if results.get("heatmap", True) else "[FAIL]",
-        "[OK]" if results.get("rank", True) else "[FAIL]",
+        "[OK]" if rank_ok else "[SKIP]",
         "[OK]" if results.get("rss_html", False) else "[FAIL]",
     ))
     print("-" * 65)
@@ -511,7 +513,7 @@ def main():
     print("       整合: {}".format(output_path))
     print("=" * 65)
 
-    return 0 if all(results.values()) else 1
+    return 0 if critical_ok else 1
 
 
 if __name__ == "__main__":

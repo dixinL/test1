@@ -6,7 +6,7 @@ on:
   schedule:
     # 北京时间每天早上5点 = UTC 21:00（前一天）
     - cron: "0 21 * * *"
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:  # 允许手动触发[FAIL] 报告: [OK] | 热力图: [OK] | 排名: [FAIL] | 整合: [OK]
 
 permissions:
   contents: write
