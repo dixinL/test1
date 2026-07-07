@@ -336,6 +336,10 @@ def main():
     print("=" * 65)
     print("   [*] 申万二级行业每日统一调度")
     print("   开始时间: {}".format(start_time.strftime("%Y-%m-%d %H:%M:%S")))
+    print("   本地日期: {} | UTC日期: {}".format(
+        date.today(),
+        datetime.utcnow().date()
+    ))
     print("=" * 65)
     sys.stdout.flush()
 
