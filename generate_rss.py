@@ -8,6 +8,7 @@ import re
 import sys
 from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
+import xml.etree.ElementTree as ET
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
@@ -81,9 +82,28 @@ def generate_rss():
 
     html_files.sort(reverse=True)  # 最新在前
 
+    # 读取旧的 RSS XML 中的 pubDate
+    old_pub_dates = {}
+    rss_path = os.path.join(OUTPUT_DIR, "rss.xml")
+    if os.path.exists(rss_path):
+        try:
+            tree = ET.parse(rss_path)
+            root = tree.getroot()
+            channel = root.find("channel")
+            if channel is not None:
+                for item in channel.findall("item"):
+                    link = item.find("link")
+                    pub_date = item.find("pubDate")
+                    if link is not None and pub_date is not None:
+                        old_pub_dates[link.text] = pub_date.text
+            print("[INFO] 已读取 {} 条旧的 pubDate".format(len(old_pub_dates)))
+        except Exception:
+            pass
+
     # 构建 RSS items
     items_xml = []
     latest_date = None
+    is_first = True
     for filename in html_files:
         filepath = os.path.join(OUTPUT_DIR, filename)
         report_date, title, desc = extract_html_info(filepath)
@@ -92,9 +112,17 @@ def generate_rss():
             latest_date = report_date
 
         url = "{}/output/{}".format(SITE_BASE, filename)
-        mtime = os.path.getmtime(filepath)
-        pub_datetime = datetime.fromtimestamp(mtime)
-        pub_date = pub_datetime.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+
+        # 最新的记录使用当前时间，旧记录使用旧的 pubDate
+        if is_first:
+            pub_date = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            is_first = False
+        elif url in old_pub_dates:
+            pub_date = old_pub_dates[url]
+        else:
+            mtime = os.path.getmtime(filepath)
+            pub_datetime = datetime.fromtimestamp(mtime)
+            pub_date = pub_datetime.strftime("%Y-%m-%dT%H:%M:%S+08:00")
 
         item = """    <item>
       <title>{title}</title>

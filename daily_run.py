@@ -328,9 +328,8 @@ def main():
     主流程:
       1. 生成报告 (action_report.py)
       2. 生成热力图 (draw_heatmap.py width + congestion)
-      3. 生成排名 (sw2_score_rank.py)
-      4. 收集产物路径
-      5. 整合为 RSS HTML
+      3. 收集产物路径
+      4. 整合为 RSS HTML
     """
     start_time = datetime.now()
     print("=" * 65)
@@ -345,9 +344,8 @@ def main():
 
     # 解析参数
     no_image = "--no-image" in sys.argv
-    no_rank = "--no-rank" in sys.argv
     no_report = "--no-report" in sys.argv
-    print("   参数: no_image={}, no_rank={}, no_report={}".format(no_image, no_rank, no_report))
+    print("   参数: no_image={}, no_report={}".format(no_image, no_report))
     sys.stdout.flush()
 
     results = {}
@@ -401,33 +399,10 @@ def main():
         print("   [Step 2] 跳过热力图 (--no-image)")
         sys.stdout.flush()
 
-    # ---- Step 3: 生成排名数据 ----
-    step_start = datetime.now()
-    if not no_rank:
-        print("\n" + "#" * 65)
-        print("# Step 3/5: 生成排名数据 (sw2_score_rank.py)")
-        print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        print("#" * 65)
-        sys.stdout.flush()
-
-        ok, _, _ = run_script("sw2_score_rank.py", label="评分排名")
-        results["rank"] = ok
-        step_elapsed = (datetime.now() - step_start).total_seconds()
-        print("   [Step 3] 评分排名: {} (用时: {:.1f}s)".format(
-            "成功" if ok else "失败",
-            step_elapsed
-        ))
-        sys.stdout.flush()
-        if not ok:
-            errors.append("score rank 失败")
-    else:
-        print("   [Step 3] 跳过排名数据 (--no-rank)")
-        sys.stdout.flush()
-
-    # ---- Step 4: 收集产物路径 ----
+    # ---- Step 3: 收集产物路径 ----
     step_start = datetime.now()
     print("\n" + "#" * 65)
-    print("# Step 4/5: 收集产物路径")
+    print("# Step 3/4: 收集产物路径")
     print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     print("#" * 65)
     sys.stdout.flush()
@@ -435,14 +410,13 @@ def main():
     today_str = date.today().strftime("%Y-%m-%d")
 
     report_path = find_latest_file(os.path.join(BASE_DIR, "report"), "action_report_")
-    rank_csv = find_latest_file(os.path.join(BASE_DIR, "rank"), "sw2_score_rank_") if results.get("rank", True) else None
+    rank_csv = None
     width_img = find_latest_file(os.path.join(BASE_DIR, "width"), "_heatmap.png")
     cong_img = find_latest_file(os.path.join(BASE_DIR, "congestion"), "_heatmap.png")
 
-    print("   [Step 4] 报告路径: {}".format(report_path or "未找到"))
-    print("   [Step 4] 排名路径: {} ({})".format(rank_csv or "未使用", "排名失败跳过" if not results.get("rank") else "正常"))
-    print("   [Step 4] 宽度图: {}".format(width_img or "未找到"))
-    print("   [Step 4] 拥挤度图: {}".format(cong_img or "未找到"))
+    print("   [Step 3] 报告路径: {}".format(report_path or "未找到"))
+    print("   [Step 3] 宽度图: {}".format(width_img or "未找到"))
+    print("   [Step 3] 拥挤度图: {}".format(cong_img or "未找到"))
     sys.stdout.flush()
 
     data_date = today_str
@@ -451,18 +425,18 @@ def main():
         m = re.search(r'(\d{4}-\d{2}-\d{2})', os.path.basename(report_path))
         if m:
             data_date = m.group(1)
-    print("   [Step 4] 数据日期: {}".format(data_date))
+    print("   [Step 3] 数据日期: {}".format(data_date))
     sys.stdout.flush()
 
     output_path = os.path.join(OUTPUT_DIR, "daily_{}.html".format(data_date))
     step_elapsed = (datetime.now() - step_start).total_seconds()
-    print("   [Step 4] 完成 (用时: {:.1f}s)".format(step_elapsed))
+    print("   [Step 3] 完成 (用时: {:.1f}s)".format(step_elapsed))
     sys.stdout.flush()
 
-    # ---- Step 5: 生成 RSS HTML ----
+    # ---- Step 4: 生成 RSS HTML ----
     step_start = datetime.now()
     print("\n" + "#" * 65)
-    print("# Step 5/5: 生成 RSS HTML")
+    print("# Step 4/4: 生成 RSS HTML")
     print("# 时间: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     print("#" * 65)
     sys.stdout.flush()
@@ -477,7 +451,7 @@ def main():
     )
     results["rss_html"] = ok
     step_elapsed = (datetime.now() - step_start).total_seconds()
-    print("   [Step 5] 生成 RSS HTML: {} (用时: {:.1f}s)".format(
+    print("   [Step 4] 生成 RSS HTML: {} (用时: {:.1f}s)".format(
         "成功" if ok else "失败",
         step_elapsed
     ))
@@ -488,14 +462,12 @@ def main():
     print("\n" + "=" * 65)
     print("   [*] 完成! 总用时: {:.1f}s".format(elapsed))
     print("-" * 65)
-    rank_ok = results.get("rank", True)
     critical_ok = all([results.get("report", True), results.get("heatmap", True), results.get("rss_html", False)])
     status_icon = "[OK]" if critical_ok else "[FAIL]"
-    print("   {} 报告: {} | 热力图: {} | 排名: {} | 整合: {}".format(
+    print("   {} 报告: {} | 热力图: {} | 整合: {}".format(
         status_icon,
         "[OK]" if results.get("report", True) else "[FAIL]",
         "[OK]" if results.get("heatmap", True) else "[FAIL]",
-        "[OK]" if rank_ok else "[SKIP]",
         "[OK]" if results.get("rss_html", False) else "[FAIL]",
     ))
     print("-" * 65)
@@ -504,8 +476,6 @@ def main():
     print("   [*] 输出文件:")
     if report_path:
         print("       报告: {}".format(report_path))
-    if rank_csv:
-        print("       排名: {}".format(rank_csv))
     if width_img:
         print("       宽度图: {}".format(width_img))
     if cong_img:
