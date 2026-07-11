@@ -5,8 +5,19 @@
     <link>https://dixinl.github.io/test1/output/</link>
     <description>每日自动生成申万二级行业分析报告：市场宽度、行业拥挤度、场景判断、综合排名</description>
     <language>zh-CN</language>
-    <lastBuildDate>Sat, 11 Jul 2026 06:03:42 +0800</lastBuildDate>
+    <lastBuildDate>Sun, 12 Jul 2026 05:50:39 +0800</lastBuildDate>
     <atom:link href="https://dixinl.github.io/test1/output/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>申万二级行业日报 - 2026-07-12</title>
+      <link>https://dixinl.github.io/test1/output/daily_2026-07-12.html</link>
+      <description><![CDATA[### 当前市场判断 - 宽度弱势 + 低拥挤 = **弱势磨底**
+市场宽度: - 拥挤度均值: 48.9 | 状态: **清淡** | 趋势: 降温 (-1.16/天)
+行业拥挤度: - 拥挤度均值: 48.9 | 状态: **清淡** | 趋势: 降温 (-1.16/天)
+信号统计: -
+有效行业: 0 个]]></description>
+      <pubDate>2026-07-12T05:50:39+08:00</pubDate>
+      <guid isPermaLink="true">https://dixinl.github.io/test1/output/daily_2026-07-12.html</guid>
+    </item>
     <item>
       <title>申万二级行业日报 - 2026-07-11</title>
       <link>https://dixinl.github.io/test1/output/daily_2026-07-11.html</link>
