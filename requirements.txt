@@ -2,3 +2,4 @@ pandas
 akshare
 requests
 Pillow
+openpyxl

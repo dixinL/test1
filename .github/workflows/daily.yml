@@ -6,7 +6,7 @@ on:
   schedule:
     # 北京时间每天早上5点 = UTC 21:00（前一天）
     - cron: "0 21 * * *"
-  workflow_dispatch:  # 允许手动触发[FAIL] 报告: [OK] | 热力图: [OK] | 排名: [FAIL] | 整合: [OK]
+  workflow_dispatch:  # 允许手动触发
 
 permissions:
   contents: write
@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 60
     env:
       TZ: Asia/Shanghai
+      # 统一 pyc 缓存位置，避免 __pycache__ 混入提交
+      PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.pycache
 
     steps:
       - name: 检出代码
@@ -25,33 +27,20 @@ jobs:
       - name: 安装 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-
-      - name: 安装系统依赖（中文字体）
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-wqy-microhei
-          fc-cache -fv
+          python-version: "3.12"
 
       - name: 安装 Python 依赖
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 运行 daily_run
-        run: |
-          python daily_run.py
-
-      - name: 生成 RSS 订阅源
-        run: |
-          python generate_rss.py
-
-      - name: 推送微信通知 (WxPusher)
+      - name: 运行 daily（刷新→趋势→日报→整合→RSS→推送）
+        working-directory: analysis-hub
         env:
           WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
           WXPUSHER_UIDS: ${{ secrets.WXPUSHER_UIDS }}
         run: |
-          python wxpusher_notify.py
+          python run.py daily --notify
 
       - name: 提交生成的文件
         run: |
@@ -61,7 +50,8 @@ jobs:
           # 获取当日日期
           TODAY=$(date +%Y-%m-%d)
 
-          git add report/ rank/ width/ congestion/ quotes/ output/ 2>/dev/null || true
+          git add analysis-hub/report/ sw2-daily-report/report/ \
+                  sw2-trend-analysis/data/exports/ 2>/dev/null || true
 
           # 仅在有变更时提交
           if git diff --staged --quiet; then
