@@ -19,6 +19,8 @@ jobs:
       TZ: Asia/Shanghai
       # 统一 pyc 缓存位置，避免 __pycache__ 混入提交
       PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.pycache
+      # CI 非 tty 下 Python 子进程 stdout 块缓冲会导致日志长时间不刷新，强制实时输出
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: 检出代码
