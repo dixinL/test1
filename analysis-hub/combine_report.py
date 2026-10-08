@@ -341,22 +341,25 @@ def build_recommendation_sections(rec_res):
                 for b in p.get('breakdown', []))
             picks_lines.append('- 推导链：{}'.format(chain))
 
-    # ---- near：离达标最近 ----
+    # ---- near：离达标最近（表格，与淘汰表同风格）----
     near_lines = []
     rej0 = res.get('rejected_items') or []
     score_cut0 = [r for r in rej0
                   if (r.get('rejected') or [''])[0].startswith('推荐指数不足')]
-    for r in score_cut0[:10]:
-        bd = [b for b in (r.get('breakdown') or []) if b.get('权重', 0) > 0]
-        weak = sorted(bd, key=lambda b: b.get('归一分', 100))[:2]
-        weak_txt = '、'.join(
-            '{}({}，归一 {:.0f}/100)'.format(
-                b.get('项'), _SCORE_GLOSS.get(b.get('项'), ''), b.get('归一分', 0))
-            for b in weak)
-        near_lines.append('- 离达标最近：{} {}（{:.1f}，差 {:.1f}）短板在 {}。'.format(
-            r['code'], r['name'], r['rec_score'],
-            (res.get('min_rec_score') or 0) - r['rec_score'],
-            weak_txt or '整体偏弱'))
+    if score_cut0:
+        near_lines.append('| 推荐指数 | 板块 | 差距 | 短板（归一最低 2 项） |')
+        near_lines.append('|---|---|---|---|')
+        for r in score_cut0[:10]:
+            bd = [b for b in (r.get('breakdown') or []) if b.get('权重', 0) > 0]
+            weak = sorted(bd, key=lambda b: b.get('归一分', 100))[:2]
+            weak_txt = '、'.join(
+                '{}({}，归一 {:.0f}/100)'.format(
+                    b.get('项'), _SCORE_GLOSS.get(b.get('项'), ''), b.get('归一分', 0))
+                for b in weak)
+            near_lines.append('| {:.1f} | {} {} | 差 {:.1f} | {} |'.format(
+                r['rec_score'], r['code'], r['name'],
+                (res.get('min_rec_score') or 0) - r['rec_score'],
+                weak_txt or '整体偏弱'))
 
     # ---- detail：候选池统计 + 方法 + 淘汰表（紧凑排版）----
     detail_lines = []

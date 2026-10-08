@@ -18,6 +18,7 @@
 import os
 import re
 import sys
+import html as _html
 import json as _json
 import urllib.request as _urllib_req
 from datetime import datetime
@@ -31,7 +32,7 @@ DAILY_REPORT_DIR = os.path.join(REPO_DIR, "sw2-daily-report", "report")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN", "")
 WXPUSHER_UIDS = [u.strip() for u in os.environ.get("WXPUSHER_UIDS", "").split(",") if u.strip()]
 SITE_URL = "https://dixinl.github.io/test1/sw2-daily-report/"
-MAX_CONTENT_BYTES = 30000  # WxPusher 上限 ~40000 字节, 留余量
+MAX_CONTENT_BYTES = 36000  # WxPusher 硬上限 40000 字节, 留余量
 # ==========================================
 
 
@@ -79,56 +80,130 @@ def extract_date_from_filename(filepath):
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _section_lines(all_lines, start_key, stop_keys, max_lines=40):
-    """提取 start_key 命中的章节标题起，到任一 stop_keys 前的内容。"""
-    start = None
-    for i, line in enumerate(all_lines):
-        s_clean = re.sub(r'^#{1,3}\s*', '', line.strip())
-        if start is None and start_key in s_clean:
-            start = i
-        elif start is not None and any(k in s_clean for k in stop_keys):
-            return all_lines[start:i]
-    if start is None:
-        return []
-    return all_lines[start:start + max_lines]
+def _trim_report(md, max_bytes):
+    """全文超上限时的降级：按最小标题从后往前整段删除，直到不超限。
+
+    先删最小级标题的段落（如 #### 淘汰表），该级删完仍超则逐级放大（###、##）；
+    每轮都从最后一个该级段落开始删（后删的总是价值最低的尾部内容）。
+    H1 报告名永不删；极端兜底按 UTF-8 字节硬截断。"""
+    lines = md.rstrip().splitlines()
+
+    def blen(ls):
+        return len("\n".join(ls).encode("utf-8"))
+
+    for level in (4, 3, 2):
+        while blen(lines) > max_bytes:
+            starts = [i for i, ln in enumerate(lines)
+                      if re.match(r'^' + '#' * level + r'\s', ln)]
+            if not starts:
+                break
+            s = starts[-1]
+            # 该段终点 = 下一个级别 <= level 的标题行或文件尾
+            e = len(lines)
+            for j in range(s + 1, len(lines)):
+                m = re.match(r'^(#{1,6})\s', lines[j])
+                if m and len(m.group(1)) <= level:
+                    e = j
+                    break
+            del lines[s:e]
+            while lines and not lines[-1].strip():
+                lines.pop()
+        if blen(lines) <= max_bytes:
+            break
+
+    out = "\n".join(lines)
+    if len(out.encode("utf-8")) > max_bytes:
+        out = out.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+    return out
 
 
-def _build_digest(all_lines, data_date, market_status):
-    """降级用章节摘要（全文超字节上限时才调用）：
-    提取「分析与建议 / 重点推荐 / 市场总体状态」三段拼接。"""
-    md_lines = []
-    md_lines.append("# 申万二级行业整合报告 {}".format(data_date))
-    md_lines.append("")
+def _inline_html(s):
+    """行内 Markdown（加粗/链接）转 HTML，先转义防注入。"""
+    s = _html.escape(s)
+    s = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', s)
+    s = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', s)
+    return s
 
-    if market_status:
-        md_lines.append("> **{}**".format(market_status))
-        md_lines.append("")
 
-    # 第一段: 下一交易日分析与建议（整合报告「一、」的市场环境判断部分）
-    advice = _section_lines(all_lines, "一、", ["重点推荐（达标标的）"])
-    if advice:
-        md_lines.append("## 分析与建议")
-        md_lines.extend(advice[:40])
-        md_lines.append("")
+_TD_STYLE = 'border:1px solid #ccc;font-size:12px;'
 
-    # 第二段: 重点推荐 + 离达标最近（整合报告「一、」的推荐子节）
-    rec = _section_lines(all_lines, "重点推荐（达标标的）", ["二、"])
-    if rec:
-        md_lines.append("## 重点推荐")
-        md_lines.extend(rec[:40])
-        md_lines.append("")
 
-    # 第三段: 市场总体状态
-    state = _section_lines(all_lines, "二、", ["三、"], max_lines=30)
-    if state:
-        md_lines.append("## 市场总体状态")
-        md_lines.extend(state[:30])
+def _build_html_table(rows):
+    """表格块 -> HTML <table>（首行作表头，带边框与底色）。"""
+    if not rows:
+        return ''
+    parts = ['<table style="border-collapse:collapse;margin:4px 0;">']
+    for ri, cells in enumerate(rows):
+        tag = 'th' if ri == 0 else 'td'
+        extra = 'background:#eef2f7;' if ri == 0 else ''
+        parts.append('<tr>')
+        for c in cells:
+            parts.append('<{0} style="{1}{2}">{3}</{0}>'.format(
+                tag, _TD_STYLE, extra, _inline_html(c)))
+        parts.append('</tr>')
+    parts.append('</table>')
+    return ''.join(parts)
 
-    if len(md_lines) <= 3:
-        # 结构识别失败时兜底：直接取报告前若干行
-        md_lines.extend(all_lines[:40])
 
-    return "\n".join(md_lines)
+def _md_to_html(md):
+    """Markdown 报告 -> WxPusher HTML（contentType=2）。
+
+    颜色方案：H1 红 / H2 蓝灰 / H3 蓝，标题带底边线；
+    趋势榜「强度=+」红、「强度=-」绿（A股惯例涨红跌绿）；引用灰斜体；
+    表格转真实 <table>（边框+表头底色）。"""
+    out = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        t = lines[i].strip()
+        # 表格块 -> 真实 <table>（跳过 |---| 分隔行）
+        if t.startswith('|') and t.endswith('|'):
+            rows = []
+            while i < len(lines):
+                t2 = lines[i].strip()
+                if not (t2.startswith('|') and t2.endswith('|')):
+                    break
+                cells = [c.strip() for c in t2.strip('|').split('|')]
+                if not all(re.fullmatch(r':?-{2,}:?', c) for c in cells if c):
+                    rows.append(cells)
+                i += 1
+            out.append(_build_html_table(rows))
+            continue
+        if not t:
+            out.append('<br/>')
+            i += 1
+            continue
+        if t == '---':
+            out.append('<hr/>')
+            i += 1
+            continue
+        # 标题
+        hm = re.match(r'^(#{1,6})\s+(.*)$', t)
+        if hm:
+            level = len(hm.group(1))
+            color = {1: '#c0392b', 2: '#34495e'}.get(level, '#1a5276')
+            size = {1: 20, 2: 17}.get(level, 15)
+            lv = min(level + 1, 6)
+            out.append('<h{0} style="color:{1};font-size:{2}px;'
+                       'border-bottom:1px solid #ddd;padding-bottom:2px;margin:10px 0 4px;">{3}</h{0}>'.format(
+                           lv, color, size, _inline_html(hm.group(2))))
+            i += 1
+            continue
+        # 引用
+        if t.startswith('>'):
+            out.append('<p style="color:#888;margin:2px 0;"><i>' + _inline_html(t.lstrip('> ')) + '</i></p>')
+            i += 1
+            continue
+        # 列表行：UP/DOWN 榜按强度正负着色
+        body = t[2:] if t.startswith('- ') else t
+        bullet = '• ' if t.startswith('- ') else ''
+        im = re.search(r'强度=([+-])', body)
+        color = ''
+        if im:
+            color = 'color:#c0392b;' if im.group(1) == '+' else 'color:#1e8449;'
+        out.append('<p style="margin:2px 0;{}">{}{}</p>'.format(color, bullet, _inline_html(body)))
+        i += 1
+    return ''.join(out)
 
 
 def send_wxpusher(report_path, data_date):
@@ -174,19 +249,29 @@ def send_wxpusher(report_path, data_date):
     if pm:
         position = "仓位={}".format(pm.group(1))
 
-    # ---- 构建推送内容：不做任何 Markdown 处理，直接按纯文本(contentType=1)发送 ----
-    tail_link = "\n\n---\n[查看完整报告(含图表)]({}) | 数据截止: {}".format(SITE_URL, data_date)
-    if file_size <= MAX_CONTENT_BYTES:
-        content = full_report.rstrip() + tail_link
-        print("  [WxPusher] 模式: 整篇推送全文 {} 行 ({:.0f}KB <= 上限 {:.0f}KB)".format(
-            len(all_lines), file_size / 1024, MAX_CONTENT_BYTES / 1024))
+    # ---- 构建推送内容：HTML 渲染（标题/涨跌带颜色），超限按最小标题从后往前删段 ----
+    tail_link = '<hr/><p><a href="{0}">查看完整报告(含图表)</a> | 数据截止: {1}</p>'.format(
+        SITE_URL, data_date)
+    content = _md_to_html(full_report.rstrip()) + tail_link
+    if len(content.encode("utf-8")) <= MAX_CONTENT_BYTES:
+        print("  [WxPusher] 模式: 整篇推送全文 (HTML {:.0f}KB <= 上限 {:.0f}KB)".format(
+            len(content.encode("utf-8")) / 1024, MAX_CONTENT_BYTES / 1024))
     else:
-        content = _build_digest(all_lines, data_date, market_status) + tail_link
-        print("  [WxPusher] 模式: 章节摘要（全文 {:.0f}KB 超上限 {:.0f}KB）".format(
-            file_size / 1024, MAX_CONTENT_BYTES / 1024))
+        # 降级：不重组内容，只从尾部整段删除（先删最小级标题段，逐级放大）
+        budget = MAX_CONTENT_BYTES - len(tail_link.encode("utf-8")) - 500
+        while True:
+            trimmed_md = _trim_report(full_report.rstrip(), budget)
+            content = _md_to_html(trimmed_md) + tail_link
+            if len(content.encode("utf-8")) <= MAX_CONTENT_BYTES or budget < 1000:
+                break
+            budget = int(budget * 0.9)  # HTML 标签膨胀超预期时收紧预算重试
+        print("  [WxPusher] 模式: 逐段删减 (全文 {:.0f}KB -> 删减后 {:.0f}KB, HTML {:.0f}KB)".format(
+            file_size / 1024, len(trimmed_md.encode("utf-8")) / 1024,
+            len(content.encode("utf-8")) / 1024))
 
     actual_size = len(content.encode("utf-8"))
-    print("  [WxPusher] 推送首行: {}".format(content.splitlines()[0] if content else "(空)"))
+    first_text = re.sub(r'<[^>]+>', '', content.splitlines()[0]) if content else "(空)"
+    print("  [WxPusher] 推送首行: {}".format(first_text))
     print("  [WxPusher] 推送大小: {:.0f}KB / 限制 {:.0f}KB ({:.0f}% 使用)".format(
         actual_size / 1024, MAX_CONTENT_BYTES / 1024,
         actual_size / MAX_CONTENT_BYTES * 100))
@@ -199,7 +284,7 @@ def send_wxpusher(report_path, data_date):
         "appToken": WXPUSHER_APP_TOKEN,
         "content": content,
         "summary": summary[:99],
-        "contentType": 1,          # 1=text / 2=HTML / 3=Markdown（正文已转纯文本）
+        "contentType": 2,          # 2=HTML（带内联颜色） / 3=Markdown / 1=text
         "topicIds": [],
         "uids": WXPUSHER_UIDS,
         "url": SITE_URL,
