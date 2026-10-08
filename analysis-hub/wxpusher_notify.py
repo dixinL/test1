@@ -9,9 +9,10 @@
   python wxpusher_notify.py --date 2026-09-20   # 指定日期
   python wxpusher_notify.py report/xxx.md       # 指定报告文件
 
-环境变量(可选):
-  WXPUSHER_APP_TOKEN: 覆盖脚本内置的 appToken
-  WXPUSHER_UIDS:      覆盖默认接收者(逗号分隔)
+环境变量(必填，代码不再内置明文):
+  WXPUSHER_APP_TOKEN: WxPusher appToken
+  WXPUSHER_UIDS:      接收者 UID(逗号分隔)
+  未配置时跳过推送并以非零码退出（run.py 中仅告警，不影响主流程）。
 """
 
 import os
@@ -26,16 +27,9 @@ REPO_DIR = os.path.dirname(BASE_DIR)
 HUB_REPORT_DIR = os.path.join(BASE_DIR, "report")
 DAILY_REPORT_DIR = os.path.join(REPO_DIR, "sw2-daily-report", "report")
 
-# ====== 默认配置 (可被环境变量覆盖) ======
-WXPUSHER_APP_TOKEN = os.environ.get(
-    "WXPUSHER_APP_TOKEN",
-    "AT_RIaNQJyOk7E1wBw8MaunfCp5wA51cFJa"
-)
-WXPUSHER_UIDS = os.environ.get(
-    "WXPUSHER_UIDS",
-    # "UID_XLrkn2Or2zHTgGsEzR5gi8RCFkzD,UID_T7HyOt7KWWhTtwsanVAJ0UDbG77O,UID_svsRsMKanInF9hfJOHBbSvd4cPho,UID_F8tW6XkunMiPNOSnsn6iVEKmBto6"
-    "UID_XLrkn2Or2zHTgGsEzR5gi8RCFkzD"
-).split(",")
+# ====== 配置：只读环境变量，明文不入代码（CI 用 secrets 注入）======
+WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN", "")
+WXPUSHER_UIDS = [u.strip() for u in os.environ.get("WXPUSHER_UIDS", "").split(",") if u.strip()]
 SITE_URL = "https://dixinl.github.io/test1/sw2-daily-report/"
 MAX_CONTENT_BYTES = 30000  # WxPusher 上限 ~40000 字节, 留余量
 # ==========================================
@@ -255,7 +249,11 @@ def send_wxpusher(report_path, data_date):
 
 
 def main():
-    """主入口: 解析参数 → 找报告 → 推送"""
+    """主入口: 校验环境变量 → 解析参数 → 找报告 → 推送"""
+    if not WXPUSHER_APP_TOKEN or not WXPUSHER_UIDS:
+        print("[WxPusher] 未配置 WXPUSHER_APP_TOKEN / WXPUSHER_UIDS 环境变量，跳过推送")
+        sys.exit(1)
+
     report_path = None
     data_date = None
 
