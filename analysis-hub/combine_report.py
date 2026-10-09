@@ -583,6 +583,10 @@ def generate(tool_results=None, as_of_date=None):
         for k in ('daily', 'trend'):
             if k in tool_results:
                 status_bits.append('{}={}'.format(k, 'OK' if tool_results[k] == 0 else 'FAIL'))
+        # trend(二级)=run.py 第 1 步自动注入的二级数据重算，同样计入 trend 状态
+        if 'trend' not in tool_results and 'trend(二级)' in tool_results:
+            status_bits.append('trend={}'.format(
+                'OK' if tool_results['trend(二级)'] == 0 else 'FAIL'))
         if status_bits:
             header += ' | 本次工具运行: {}'.format(' | '.join(status_bits))
     parts.append(header)
