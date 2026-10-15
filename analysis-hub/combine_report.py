@@ -107,6 +107,71 @@ def _parse_scene_matrix(text):
     return scenes
 
 
+STATE_RECAP_WINDOW = 10
+
+
+def _load_state_history(as_of_date=None):
+    """扫描历史 combined 报告（日期早于 as_of_date），返回按日期升序的
+    [(date, overall)]：综合判断原文。解析失败的条目记空串（会打断连续计数）。"""
+    today_str = as_of_date or date.today().strftime('%Y-%m-%d')
+    entries = []
+    for p in glob.glob(os.path.join(COMBINED_DIR, 'combined_*.md')):
+        m = re.search(r'(\d{4}-\d{2}-\d{2})', os.path.basename(p))
+        if not m or m.group(1) >= today_str:
+            continue
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                text = f.read()
+        except Exception:
+            continue
+        om = re.search(r'^\s*[-*]\s*综合判断[：:]\s*(.+)', text, re.M)
+        entries.append((m.group(1),
+                        om.group(1).strip().rstrip('。') if om else ''))
+    entries.sort(key=lambda e: e[0])
+    return entries
+
+
+def _overall_position(overall):
+    """综合判断取仓位关键词：'仓位=防守试探；...' -> '防守试探'。"""
+    m = re.search(r'仓位[=:：]\s*([^；;]+)', overall)
+    return m.group(1).strip() if m else overall
+
+
+def _group_state_runs(seq):
+    """[(date, key, disp)] -> [(start, end, key, disp, days)]，相邻同 key 合并。"""
+    runs = []
+    for d, k, disp in seq:
+        if runs and runs[-1][2] == k:
+            runs[-1] = (runs[-1][0], d, k, disp, runs[-1][4] + 1)
+        else:
+            runs.append((d, d, k, disp, 1))
+    return runs
+
+
+def _state_recap_line(history, current_key, current_disp, today_str, show_days=True):
+    """生成"{状态关键词}已持续 N 天（自 MM-DD 起）"一行；连续不足 10 天时
+    追加"近10日"分组回顾（相邻同状态合并，只列关键词结论）。
+    history 为 [(date, key, disp)] 升序：key 为比较态，disp 为展示关键词；
+    show_days=False 时回顾段不附天数。无历史返回 None。"""
+    streak, since = 1, today_str
+    for d, k, _s in reversed(history):
+        if k == current_key:
+            streak += 1
+            since = d
+        else:
+            break
+    line = '- {}已持续 {} 天（自 {} 起）'.format(current_disp or '（缺失）', streak, since[5:])
+    if streak < STATE_RECAP_WINDOW:
+        seq = history[-(STATE_RECAP_WINDOW - 1):] + [(today_str, current_key, current_disp)]
+        parts = []
+        for st, en, _k, disp, n in _group_state_runs(seq[-STATE_RECAP_WINDOW:]):
+            rng = st[5:] if st == en else '{}~{}'.format(st[5:], en[5:])
+            parts.append('{} {}{}'.format(rng, disp or '（缺失）',
+                                          '（{}天）'.format(n) if show_days else ''))
+        line += '；近10日：{}'.format(' · '.join(parts))
+    return line
+
+
 def extract_daily_state(report_path):
     """从日报 Markdown 中抽取"一、市场总体状态"整段及结构化字段。找不到返回 None。"""
     if not report_path or not os.path.isfile(report_path):
@@ -408,13 +473,16 @@ def build_recommendation_sections(rec_res):
     return ('\n'.join(picks_lines), '\n'.join(near_lines), '\n'.join(detail_lines))
 
 
-def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=None):
+def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=None,
+                  today_str=None):
     """结合日报市场判词 + 九场景矩阵 + 趋势双榜 + UP 榜均线位置，给出下一交易日判断。
 
     结论先行（信息按重要性排布）：
       ### 当前市场判断 —— 日报市场级判词（仓位基调的源头）
-      ### 综合建议     —— 仓位/介入/升降级条件/风险提示
+      ### 综合建议     —— 仓位/介入/升降级条件 + 连续状态天数
       ### 判断依据     —— 数据基准/市场基调/宽拥结构/九场景结构/多空结构/均线位置
+
+    综合判断的连续状态天数基于历史 combined 报告回溯：连续不足 10 天时附近10日分组回顾。
 
     判断链（各维度各司其职，汇入"综合判断"）：
       仓位基调 <- 市场级四场景（宽度×拥挤度，与日报判词生成逻辑一致）
@@ -422,6 +490,7 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
       参与方式 <- UP 榜绝对占比
       介入时点 <- UP 榜加权乖离率
     """
+    today_str = today_str or date.today().strftime('%Y-%m-%d')
     lines = []
     verdict = daily_state.get('verdict') if daily_state else ''
     scenario = daily_state.get('scenario') if daily_state else ''
@@ -541,16 +610,23 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
         else:
             bits.append('介入=等反转确认')
     # ---- 结论先行：当前市场判断 → 综合建议 → 判断依据（lines 为依据列表，紧凑排版）----
+    overall_txt = '；'.join(bits)
+    hist = _load_state_history(today_str)
+    o_line = _state_recap_line(
+        [(d, _overall_position(o), _overall_position(o)) for d, o in hist],
+        _overall_position(overall_txt), _overall_position(overall_txt),
+        today_str, show_days=False)
     out = ['### 当前市场判断']
     if verdict:
         out.append('- {}'.format(verdict))
     else:
         out.append('- 日报未提供明确判断，参考下方判断依据。')
     out.append('### 综合建议')
-    out.append('- 综合判断：{}。'.format('；'.join(bits)))
+    out.append('- 综合判断：{}。'.format(overall_txt))
+    if o_line:
+        out.append(o_line)
     if shift:
         out.append('- 升降级条件：{}'.format(shift))
-    out.append('- 风险提示：以上为基于历史数据的规则化推断，非投资建议；实盘需结合当日盘面与资金面二次确认。')
     out.append('### 判断依据')
     out.extend(lines)
     return '\n'.join(out)
@@ -598,7 +674,8 @@ def generate(tool_results=None, as_of_date=None):
     if daily_state is None and trend is None:
         parts.append('两大数据源均缺失，无法生成分析。请先运行 daily 与 trend 工具。')
     else:
-        parts.append(build_outlook(daily_state, trend, rec_res, daily_date, trend_date))
+        parts.append(build_outlook(daily_state, trend, rec_res, daily_date, trend_date,
+                                   today_str))
     parts.append('### 重点推荐（达标标的）')
     parts.append(rec_picks)
     if rec_near:

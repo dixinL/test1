@@ -5,6 +5,7 @@
 增强: 历史趋势分析 + 行情涨跌幅趋势参考(3/5/10/20日)
 """
 
+import csv
 import json
 import os
 import sys
@@ -1106,10 +1107,13 @@ md.append('')
 
 md.append('### 当前市场判断')
 md.append('')
+market_judgment = ('弱势磨底' if avg_w < 40 and avg_c < 60 else
+                   '高位见顶风险' if avg_w < 40 and avg_c >= 60 else
+                   '主升行情' if avg_w >= 40 and avg_c >= 60 else '启动初期')
 md.append('- {} + {} = **{}**'.format(
     '宽度极弱' if avg_w < 20 else '宽度弱势' if avg_w < 40 else '宽度中性' if avg_w < 60 else '宽度强势',
     '高拥挤' if avg_c >= 60 else '低拥挤',
-    '弱势磨底' if avg_w < 40 and avg_c < 60 else '高位见顶风险' if avg_w < 40 and avg_c >= 60 else '主升行情' if avg_w >= 40 and avg_c >= 60 else '启动初期'))
+    market_judgment))
 md.append('')
 md.append('---')
 md.append('')
@@ -1369,3 +1373,72 @@ with open(output_path, 'w', encoding='utf-8') as f:
 
 print('\n[已保存] {}'.format(output_path))
 print('  共分析 {} 个行业, 4个场景分布'.format(len(industries)))
+
+
+# ---------------------------------------------------------------------------
+# 环境快照导出 (供 test2 个股右侧判定消费):
+# 首行 MARKET 汇总 + 各二级行业行, 全精度不取整。
+# 趋势过程层由 sw2-trend-analysis 的 sw_trend_summary_*.csv 提供, 此处不重复。
+# ---------------------------------------------------------------------------
+ENV_SUMMARY_COLUMNS = [
+    'date', 'sw_code', 'sw_name', 'sw1',
+    'width', 'congestion', 'width_conf', 'cong_conf', 'confidence',
+    'width_trend', 'cong_trend',
+    'scenario', 'signal', 'sub_type', 'price_trend',
+    'chg_3d', 'chg_5d', 'chg_10d', 'chg_20d',
+    'avg_width', 'width_state', 'avg_congestion',
+    'congestion_state', 'market_judgment',
+]
+
+
+def export_env_summary():
+    """导出 env_summary_<date>.csv。失败仅告警，不影响报告生成。"""
+    if not industries:
+        print('[WARN] 无行业数据, 跳过环境快照导出')
+        return
+    try:
+        market_row = {
+            'date': report_date, 'sw_code': 'MARKET', 'sw_name': '全市场汇总', 'sw1': '',
+            'width': '', 'congestion': '', 'width_conf': '', 'cong_conf': '', 'confidence': '',
+            'width_trend': '', 'cong_trend': '',
+            'scenario': '', 'signal': '', 'sub_type': '', 'price_trend': '',
+            'chg_3d': '', 'chg_5d': '', 'chg_10d': '', 'chg_20d': '',
+            'avg_width': avg_w, 'width_state': market_status,
+            'avg_congestion': avg_c, 'congestion_state': cong_status,
+            'market_judgment': market_judgment,
+        }
+        rows = [market_row]
+        for i in industries:
+            rows.append({
+                'date': report_date,
+                'sw_code': i['code'],
+                'sw_name': i['name'],
+                'sw1': i['sw1'],
+                'width': i['width'],
+                'congestion': i['avg_cong'],
+                'width_conf': i['width_conf'],
+                'cong_conf': i['cong_conf'],
+                'confidence': i['confidence'],
+                'width_trend': i['width_trend'],
+                'cong_trend': i['cong_trend'],
+                'scenario': i['scene'].split(':')[0],
+                'signal': i['signal_mark'],
+                'sub_type': i['signal_type'],
+                'price_trend': i['price_trend'],
+                'chg_3d': i['chg_3d'], 'chg_5d': i['chg_5d'],
+                'chg_10d': i['chg_10d'], 'chg_20d': i['chg_20d'],
+                'avg_width': '', 'width_state': '',
+                'avg_congestion': '', 'congestion_state': '',
+                'market_judgment': '',
+            })
+        path = os.path.join(REPORT_DIR, 'env_summary_{}.csv'.format(report_date))
+        with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=ENV_SUMMARY_COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
+        print('[已保存] {} (环境快照: {} 行)'.format(path, len(rows)))
+    except Exception as e:  # noqa: BLE001 - 导出失败不能影响主报告
+        print('[WARN] 环境快照导出失败(不影响报告): {}'.format(e))
+
+
+export_env_summary()
