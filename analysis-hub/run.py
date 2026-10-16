@@ -601,6 +601,10 @@ def main():
         except Exception as e:
             print('[hub] 整合报告生成失败: {}'.format(e))
 
+    # 2.5 修剪给 test2 的环境快照（每前缀只保留最新 60 个交易日）
+    if run_hub_script(os.path.join(HUB_DIR, 'prune_snapshots.py')) != 0:
+        print('[hub] [WARN] 快照修剪失败（非关键步骤，不影响退出码）')
+
     # 3. 分发
     if not no_rss:
         if not run_rss():
