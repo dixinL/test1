@@ -5,8 +5,16 @@
     <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/</link>
     <description>每日申万二级行业趋势分析导出：UP/DOWN 关注榜、多窗口趋势（Excel + CSV）</description>
     <language>zh-CN</language>
-    <lastBuildDate>Mon, 26 Oct 2026 05:35:00 +0800</lastBuildDate>
+    <lastBuildDate>Wed, 28 Oct 2026 06:57:26 +0800</lastBuildDate>
     <atom:link href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>申万二级行业趋势分析 - 2026-10-27</title>
+      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-27.csv</link>
+      <description><![CDATA[<p>基准日: 2026-10-27</p>
+<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-27.csv">CSV 汇总榜单：sw_trend_summary_2026-10-27.csv</a></p>]]></description>
+      <pubDate>2026-10-28T06:57:26+08:00</pubDate>
+      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-27</guid>
+    </item>
     <item>
       <title>申万二级行业趋势分析 - 2026-10-23</title>
       <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-23.csv</link>
@@ -480,14 +488,6 @@
 <p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-23.csv">CSV 汇总榜单：sw_trend_summary_2026-07-23.csv</a></p>]]></description>
       <pubDate>2026-09-22T16:34:23+08:00</pubDate>
       <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-23</guid>
-    </item>
-    <item>
-      <title>申万二级行业趋势分析 - 2026-07-22</title>
-      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-22.csv</link>
-      <description><![CDATA[<p>基准日: 2026-07-22</p>
-<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-22.csv">CSV 汇总榜单：sw_trend_summary_2026-07-22.csv</a></p>]]></description>
-      <pubDate>2026-09-22T16:34:07+08:00</pubDate>
-      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-22</guid>
     </item>
   </channel>
 </rss>
