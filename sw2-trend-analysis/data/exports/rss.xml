@@ -5,8 +5,16 @@
     <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/</link>
     <description>每日申万二级行业趋势分析导出：UP/DOWN 关注榜、多窗口趋势（Excel + CSV）</description>
     <language>zh-CN</language>
-    <lastBuildDate>Fri, 30 Oct 2026 07:11:39 +0800</lastBuildDate>
+    <lastBuildDate>Fri, 30 Oct 2026 19:01:48 +0800</lastBuildDate>
     <atom:link href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>申万二级行业趋势分析 - 2026-10-30</title>
+      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-30.csv</link>
+      <description><![CDATA[<p>基准日: 2026-10-30</p>
+<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-30.csv">CSV 汇总榜单：sw_trend_summary_2026-10-30.csv</a></p>]]></description>
+      <pubDate>2026-10-30T19:01:48+08:00</pubDate>
+      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-30</guid>
+    </item>
     <item>
       <title>申万二级行业趋势分析 - 2026-10-29</title>
       <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-29.csv</link>
@@ -30,6 +38,14 @@
 <p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-27.csv">CSV 汇总榜单：sw_trend_summary_2026-10-27.csv</a></p>]]></description>
       <pubDate>2026-10-28T06:57:26+08:00</pubDate>
       <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-27</guid>
+    </item>
+    <item>
+      <title>申万二级行业趋势分析 - 2026-10-26</title>
+      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-26.csv</link>
+      <description><![CDATA[<p>基准日: 2026-10-26</p>
+<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-26.csv">CSV 汇总榜单：sw_trend_summary_2026-10-26.csv</a></p>]]></description>
+      <pubDate>2026-10-30T18:33:13+08:00</pubDate>
+      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-26</guid>
     </item>
     <item>
       <title>申万二级行业趋势分析 - 2026-10-23</title>
@@ -56,6 +72,14 @@
       <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-21</guid>
     </item>
     <item>
+      <title>申万二级行业趋势分析 - 2026-10-20</title>
+      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-20.csv</link>
+      <description><![CDATA[<p>基准日: 2026-10-20</p>
+<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-20.csv">CSV 汇总榜单：sw_trend_summary_2026-10-20.csv</a></p>]]></description>
+      <pubDate>2026-10-30T18:33:13+08:00</pubDate>
+      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-20</guid>
+    </item>
+    <item>
       <title>申万二级行业趋势分析 - 2026-10-19</title>
       <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-19.csv</link>
       <description><![CDATA[<p>基准日: 2026-10-19</p>
@@ -70,6 +94,14 @@
 <p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-16.csv">CSV 汇总榜单：sw_trend_summary_2026-10-16.csv</a></p>]]></description>
       <pubDate>2026-10-19T06:52:32+08:00</pubDate>
       <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-16</guid>
+    </item>
+    <item>
+      <title>申万二级行业趋势分析 - 2026-10-15</title>
+      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-15.csv</link>
+      <description><![CDATA[<p>基准日: 2026-10-15</p>
+<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-10-15.csv">CSV 汇总榜单：sw_trend_summary_2026-10-15.csv</a></p>]]></description>
+      <pubDate>2026-10-30T18:33:13+08:00</pubDate>
+      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-10-15</guid>
     </item>
     <item>
       <title>申万二级行业趋势分析 - 2026-10-14</title>
@@ -456,38 +488,6 @@
 <p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-31.csv">CSV 汇总榜单：sw_trend_summary_2026-07-31.csv</a></p>]]></description>
       <pubDate>2026-09-22T16:36:09+08:00</pubDate>
       <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-31</guid>
-    </item>
-    <item>
-      <title>申万二级行业趋势分析 - 2026-07-30</title>
-      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-30.csv</link>
-      <description><![CDATA[<p>基准日: 2026-07-30</p>
-<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-30.csv">CSV 汇总榜单：sw_trend_summary_2026-07-30.csv</a></p>]]></description>
-      <pubDate>2026-09-22T16:35:52+08:00</pubDate>
-      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-30</guid>
-    </item>
-    <item>
-      <title>申万二级行业趋势分析 - 2026-07-29</title>
-      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-29.csv</link>
-      <description><![CDATA[<p>基准日: 2026-07-29</p>
-<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-29.csv">CSV 汇总榜单：sw_trend_summary_2026-07-29.csv</a></p>]]></description>
-      <pubDate>2026-09-22T16:35:35+08:00</pubDate>
-      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-29</guid>
-    </item>
-    <item>
-      <title>申万二级行业趋势分析 - 2026-07-28</title>
-      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-28.csv</link>
-      <description><![CDATA[<p>基准日: 2026-07-28</p>
-<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-28.csv">CSV 汇总榜单：sw_trend_summary_2026-07-28.csv</a></p>]]></description>
-      <pubDate>2026-09-22T16:35:18+08:00</pubDate>
-      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-28</guid>
-    </item>
-    <item>
-      <title>申万二级行业趋势分析 - 2026-07-27</title>
-      <link>https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-27.csv</link>
-      <description><![CDATA[<p>基准日: 2026-07-27</p>
-<p><a href="https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_summary_2026-07-27.csv">CSV 汇总榜单：sw_trend_summary_2026-07-27.csv</a></p>]]></description>
-      <pubDate>2026-09-22T16:34:59+08:00</pubDate>
-      <guid isPermaLink="false">https://dixinl.github.io/test1/sw2-trend-analysis/data/exports/sw_trend_2026-07-27</guid>
     </item>
   </channel>
 </rss>
