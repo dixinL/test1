@@ -142,6 +142,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
             turnover_rate REAL,
             PRIMARY KEY (sw_code, trade_date)
         );
+
+        CREATE TABLE IF NOT EXISTS index_daily (
+            code       TEXT NOT NULL,
+            name       TEXT,
+            trade_date TEXT NOT NULL,
+            close      REAL NOT NULL,
+            PRIMARY KEY (code, trade_date)
+        );
         """)
     conn.commit()
 
@@ -275,6 +283,17 @@ def upsert_price_series(conn, code6: str, series_rows: Iterable[tuple]) -> int:
         '(sw_code, sw_name, trade_date, close, volume, amount)',
         '(?, ?, ?, ?, ?, ?)',
         rows,
+    )
+
+
+def upsert_index_daily(conn: sqlite3.Connection, code: str, name: str,
+                       rows: Iterable[tuple]) -> int:
+    """写入大盘指数日线（rows 每项 (trade_date, close)）。返回新增行数。"""
+    return _insert_ignore(
+        conn, 'index_daily',
+        '(code, name, trade_date, close)',
+        '(?, ?, ?, ?)',
+        [(str(code), name, d, float(c)) for d, c in rows],
     )
 
 

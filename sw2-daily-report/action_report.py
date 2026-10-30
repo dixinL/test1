@@ -493,6 +493,11 @@ def calc_scene_consistency(scene_history):
 W_LOW, W_MID, W_HIGH = 0, 50, 80
 C_LOW, C_MID, C_HIGH = 0, 50, 80
 
+# 大盘九场景拥挤档位阈值：按"高拥挤行业占比"划分，而非拥挤度均值。
+# 原因：均值被大量低拥挤行业稀释（历史区间 22~57，从未达 60），
+# 均值口径下高拥挤档永不触发，故改用分布型指标。
+MKT_CROWD_MID, MKT_CROWD_HIGH = 0.15, 0.30
+
 
 def classify_width(w_val):
     """三分法宽度分类: 返回 (等级名, 数字编码)"""
@@ -1114,6 +1119,23 @@ md.append('- {} + {} = **{}**'.format(
     '宽度极弱' if avg_w < 20 else '宽度弱势' if avg_w < 40 else '宽度中性' if avg_w < 60 else '宽度强势',
     '高拥挤' if avg_c >= 60 else '低拥挤',
     market_judgment))
+
+# 大盘九场景：宽度均值三分法 × 高拥挤行业占比三分法，与行业层 SCENE_MATRIX 同构。
+# 作为 4 档判断之下的精细定位层，仓位基调仍以 4 档为准。
+crowd_pool = [i for i in valid if i['avg_cong'] > 0] or valid
+hi_crowd_share = (len([i for i in crowd_pool if i['avg_cong'] >= C_HIGH]) / len(crowd_pool)
+                  if crowd_pool else 0.0)
+mkt_w_lbl, mkt_w_num = classify_width(avg_w)
+if hi_crowd_share >= MKT_CROWD_HIGH:
+    mkt_c_lbl, mkt_c_num = '高', 2
+elif hi_crowd_share >= MKT_CROWD_MID:
+    mkt_c_lbl, mkt_c_num = '中', 1
+else:
+    mkt_c_lbl, mkt_c_num = '低', 0
+mkt_scene_name, _m, mkt_scene_act = SCENE_MATRIX.get(
+    (mkt_w_num, mkt_c_num), ('未知场景', 'gray', ''))
+md.append('- 大盘九场景：**{}**（宽度{} + 高拥挤行业占比{} {:.0%}）→ {}'.format(
+    mkt_scene_name, mkt_w_lbl, mkt_c_lbl, hi_crowd_share, mkt_scene_act))
 md.append('')
 md.append('---')
 md.append('')

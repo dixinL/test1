@@ -132,6 +132,9 @@ def refresh_general_data(skip_valuation=False):
     cmd = [sys.executable, REFRESH_ENTRY]
     if skip_valuation:
         cmd.append('--no-valuation')
+    # 年度清理：CI 在每年 5 月 1 日设置 REFRESH_PURGE=1，透传 refresh.py --purge
+    if os.environ.get('REFRESH_PURGE') == '1':
+        cmd.append('--purge')
 
     print('-----------------------------------------------------------------')
     print('[hub] 第 0 步: 刷新 general-data 基础数据 (refresh.py)')

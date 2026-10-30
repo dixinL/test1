@@ -1,13 +1,14 @@
 """general-data 基础数据统一刷新入口。
 
-把 5 张表（industry / price / width / congestion / valuation）的增量刷新
-集中在一个入口，供 run.py 第 0 步调度，也可手动运行：
+把 6 张表（industry / price / width / congestion / valuation / index_daily）
+的增量刷新集中在一个入口，供 run.py 第 0 步调度，也可手动运行：
 
 用法:
     python refresh.py                # 全量刷新（含估值，最慢）
     python refresh.py --no-valuation # 跳过估值（日常够用，速度快）
     python refresh.py --days-back 30 # 指定乐咕宽度/拥挤度回看天数
     python refresh.py --valuation-since 20260101  # 估值区间回填起点 (YYYYMMDD)
+    python refresh.py --purge        # 清除 5 年滚动窗口外行情并 VACUUM
     python refresh.py --stats        # 只打印各表覆盖情况，不刷新
 
 写入全部幂等：price 只补新日期；width/congestion/valuation 主键冲突
@@ -22,6 +23,11 @@ from datetime import date, datetime, timedelta
 
 import swdb
 import swfetch
+
+# 随基础数据一起刷新的大盘指数（代码, 名称）；换沪深300 改为 ('sz399300', '沪深300')
+DEFAULT_INDEX = ('sh000001', '上证指数')
+
+RETAIN_YEARS = 5                   # 滚动保留窗口（--purge 清除窗口外行情）
 
 
 def refresh_industries(conn) -> int:
@@ -91,6 +97,34 @@ def refresh_valuation(conn, verbose=True, since=None) -> int:
     return n
 
 
+def refresh_index(conn) -> int:
+    """大盘指数日线（东方财富 kline，增量）。返回新增行数。"""
+    n = swfetch.fetch_and_store_index(conn, DEFAULT_INDEX[0], DEFAULT_INDEX[1])
+    print('[refresh] index({}): 新增 {} 行'.format(DEFAULT_INDEX[1], n))
+    return n
+
+
+def purge_old_data(conn, today: date) -> int:
+    """清除滚动窗口（RETAIN_YEARS 年）外的行情数据并 VACUUM 瘦身。
+
+    覆盖所有带 trade_date 的行情表（price/width/congestion/valuation/
+    index_daily）；维表/参数表（industry/trend/epsilon）量小且与窗口无关，
+    不清。删除发生才 VACUUM。返回删除行数。"""
+    cutoff = today.replace(year=today.year - RETAIN_YEARS).isoformat()
+    deleted = 0
+    for table in ('price', 'width', 'congestion', 'valuation', 'index_daily'):
+        cur = conn.execute(
+            'DELETE FROM {} WHERE trade_date < ?'.format(table), (cutoff,))
+        deleted += cur.rowcount
+    if deleted:
+        conn.commit()
+        conn.execute('VACUUM')
+        conn.commit()
+    print('[refresh] purge: cutoff {} · 删除 {} 行{}'.format(
+        cutoff, deleted, '（已 VACUUM 瘦身）' if deleted else ''))
+    return deleted
+
+
 def show_stats(conn) -> int:
     """打印各表覆盖情况（行数 + 关键列的 min/max），不刷新。"""
     checks = [
@@ -99,6 +133,7 @@ def show_stats(conn) -> int:
         ('width', 'trade_date'),
         ('congestion', 'trade_date'),
         ('valuation', 'trade_date'),
+        ('index_daily', 'trade_date'),
         ('trend', 'calc_date'),
         ('epsilon', 'updated_at'),
     ]
@@ -125,6 +160,8 @@ def main() -> int:
                         help='乐咕宽度/拥挤度回看自然日数（默认 40）')
     parser.add_argument('--valuation-since', type=str, default=None,
                         help='估值回填起点 (YYYYMMDD)，默认增量（空表时近 60 天）')
+    parser.add_argument('--purge', action='store_true',
+                        help='清除 {} 年滚动窗口外行情（CI 每年 5 月 1 日自动执行）'.format(RETAIN_YEARS))
     parser.add_argument('--stats', action='store_true',
                         help='只打印各表覆盖情况，不刷新')
     args = parser.parse_args()
@@ -161,11 +198,19 @@ def main() -> int:
     except Exception as e:
         print('[refresh] [WARN] congestion 刷新失败: {}'.format(e))
 
+    try:
+        refresh_index(conn)
+    except Exception as e:
+        print('[refresh] [WARN] index 刷新失败: {}'.format(e))
+
     if not args.no_valuation:
         try:
             refresh_valuation(conn, since=args.valuation_since)
         except Exception as e:
             print('[refresh] [WARN] valuation 刷新失败: {}'.format(e))
+
+    if args.purge:
+        purge_old_data(conn, date.today())
 
     conn.close()
     print('[refresh] 完成，用时 {:.1f}s'.format(time.time() - t0))

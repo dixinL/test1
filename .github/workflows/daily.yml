@@ -42,6 +42,8 @@ jobs:
           WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
           WXPUSHER_UIDS: ${{ secrets.WXPUSHER_UIDS }}
         run: |
+          # 年度清理：每年 5 月 1 日透传 --purge，清除 5 年滚动窗口外行情
+          if [ "$(date +%-m)" = "5" ] && [ "$(date +%-d)" = "1" ]; then export REFRESH_PURGE=1; fi
           python run.py daily --notify
 
       - name: 提交生成的文件
@@ -53,7 +55,7 @@ jobs:
           TODAY=$(date +%Y-%m-%d)
 
           git add analysis-hub/report/ sw2-daily-report/report/ \
-                  sw2-trend-analysis/data/exports/ 2>/dev/null || true
+                  sw2-trend-analysis/data/exports/ general-data/sw.db 2>/dev/null || true
 
           # 仅在有变更时提交
           if git diff --staged --quiet; then

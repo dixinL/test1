@@ -192,7 +192,10 @@ def extract_daily_state(report_path):
     if vm:
         verdict = vm.group(1).strip().replace('**', '')
 
-    state = {'section': section, 'verdict': verdict}
+    m9 = re.search(r'大盘九场景[:：]\s*(.+)', section)
+    mkt_scene = m9.group(1).strip().replace('**', '') if m9 else ''
+
+    state = {'section': section, 'verdict': verdict, 'mkt_scene': mkt_scene}
 
     for b in re.split(r'^###\s*', section, flags=re.M):
         if b.startswith('市场宽度'):
@@ -486,6 +489,7 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
 
     判断链（各维度各司其职，汇入"综合判断"）：
       仓位基调 <- 市场级四场景（宽度×拥挤度，与日报判词生成逻辑一致）
+      大盘九场景 <- 宽度均值三分法 × 高拥挤行业占比三分法（精细定位层，不改仓位基调）
       结构修正 <- 九场景 S1~S9 分布（修复侧/强势侧/风险侧/冰封侧）
       参与方式 <- UP 榜绝对占比
       介入时点 <- UP 榜加权乖离率
@@ -621,6 +625,10 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
         out.append('- {}'.format(verdict))
     else:
         out.append('- 日报未提供明确判断，参考下方判断依据。')
+    # 大盘九场景：精细定位层（宽度三分法 × 高拥挤行业占比），仓位基调仍以 4 档为准
+    mkt_scene = (daily_state or {}).get('mkt_scene')
+    if mkt_scene:
+        out.append('- 大盘九场景：{}'.format(mkt_scene))
     out.append('### 综合建议')
     out.append('- 综合判断：{}。'.format(overall_txt))
     if o_line:

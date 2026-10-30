@@ -10,12 +10,13 @@
 - 市场宽度:           legulegu /api/stockdata/member-ship/ma-market-width
 - 行业拥挤度:         legulegu /api/stockdata/sw-congestion
 - 估值指标(PE/PB/股息率): ak.index_analysis_daily_sw()（申万宏源官网）
+- 大盘指数日线:       东方财富 push2his kline 接口
 """
 from __future__ import annotations
 
 import hashlib
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -221,6 +222,59 @@ def fetch_and_store_congestion(conn, days_back: int = 30, level: int = 2) -> int
     if 'error' in data:
         raise RuntimeError('congestion API 错误: {}'.format(data['error']))
     return swdb.upsert_congestion_from_api(conn, data)
+
+
+INDEX_KLINE_URL = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+
+
+def fetch_index_daily(symbol: str, beg: str, end: str) -> list:
+    """拉取大盘指数日线收盘（东方财富 kline 接口），返回 [(trade_date, close)] 升序。
+
+    symbol: 'sh000001'=上证指数 / 'sz399001'=深证成指；beg/end: 'YYYY-MM-DD'。"""
+    secid = ('1.' if symbol.startswith('sh') else '0.') + symbol[2:]
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            r = requests.get(
+                INDEX_KLINE_URL,
+                params={'secid': secid, 'klt': '101', 'fqt': '1',
+                        'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
+                        'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53'},
+                timeout=15)
+            r.raise_for_status()
+            klines = (r.json().get('data') or {}).get('klines') or []
+            out = []
+            for k in klines:
+                d, v = k.split(',')[:2]
+                out.append((d, float(v)))
+            return out
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        f'拉取指数 {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {last_err}')
+
+
+def fetch_and_store_index(conn, symbol: str, name: str,
+                          days_back: int = 400) -> int:
+    """增量拉取大盘指数日线并写库。返回新增行数。
+
+    从库内该指数最新日期的次日起拉取；空表时回看 days_back 个自然日。"""
+    row = conn.execute(
+        'SELECT MAX(trade_date) FROM index_daily WHERE code = ?',
+        (symbol,)).fetchone()
+    latest = row[0] if row else None
+    end = date.today().strftime('%Y-%m-%d')
+    if latest:
+        d = datetime.strptime(latest, '%Y-%m-%d') + timedelta(days=1)
+        beg = d.strftime('%Y-%m-%d')
+    else:
+        beg = (date.today() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    if beg > end:
+        return 0
+    rows = fetch_index_daily(symbol, beg, end)
+    return swdb.upsert_index_daily(conn, symbol, name, rows)
 
 
 VALUATION_SYMBOLS = ('市场表征', '一级行业', '二级行业', '风格指数')
