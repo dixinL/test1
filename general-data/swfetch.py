@@ -332,3 +332,64 @@ def fetch_and_store_valuation(conn, start_date: str, end_date: str,
         total += swdb.upsert_valuation_rows(conn, rows)
         print('  [估值] {} 年: {} 行 (累计新增 {})'.format(y, len(rows), total))
     return total
+
+
+# — ERP 估值环境（沪深300 PE + 10Y 国债收益率）—
+
+ERP_INDEX_SYMBOL = '沪深300'
+ERP_INDEX_CODE = '000300'
+
+
+def fetch_hs300_pe() -> list:
+    """拉取沪深300 滚动市盈率(PE-TTM)全历史（乐咕，2005 起）。
+
+    返回 [(trade_date, pe_ttm)] 升序；akshare 封装自带请求头，无需乐咕 token。
+    """
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            df = ak.stock_index_pe_lg(symbol=ERP_INDEX_SYMBOL)
+            if df is None or df.empty:
+                raise ValueError('接口返回空数据')
+            out = []
+            for _, r in df.iterrows():
+                d = str(r['日期'])[:10]
+                pe = pd.to_numeric(r['滚动市盈率'], errors='coerce')
+                if d and pd.notna(pe) and pe > 0:
+                    out.append((d, float(pe)))
+            return sorted(out)
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        '拉取沪深300 PE 失败（重试 {} 次）: {}'.format(FETCH_MAX_RETRY, last_err))
+
+
+def fetch_bond_10y() -> dict:
+    """拉取中国 10 年期国债收益率全历史（单位 %），返回 {trade_date: rf}。"""
+    df = ak.bond_zh_us_rate()
+    out = {}
+    for _, r in df.iterrows():
+        d = str(r['日期'])[:10]
+        rf = pd.to_numeric(r['中国国债收益率10年'], errors='coerce')
+        if d and pd.notna(rf):
+            out[d] = float(rf)
+    return out
+
+
+def fetch_and_store_erp(conn, index_code: str = ERP_INDEX_CODE) -> int:
+    """拉取沪深300 PE 与 10Y 国债收益率，合成 ERP 行并写库。返回新增行数。
+
+    EY = 100/PE_TTM（盈利收益率%），ERP = EY − 10Y 国债收益率。
+    无国债数据对应日期的 rf/erp 留空（pe/ey 仍入库）。全历史拉取 +
+    INSERT OR IGNORE，重复运行"新增 0 行"即就绪。"""
+    pe_rows = fetch_hs300_pe()
+    rf_map = fetch_bond_10y()
+    rows = []
+    for d, pe in pe_rows:
+        ey = round(100.0 / pe, 4)
+        rf = rf_map.get(d)
+        erp = round(ey - rf, 4) if rf is not None else None
+        rows.append((index_code, d, pe, ey, rf, erp))
+    return swdb.upsert_erp_rows(conn, rows)

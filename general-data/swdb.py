@@ -8,6 +8,7 @@
 - trend     趋势计算明细（trend）
 - epsilon   死区阈值（trend）
 - valuation 估值指标 PE/PB/股息率（申万官方日线，refresh.py 顺手刷新）
+- erp      沪深300 ERP 估值环境（PE/EY/10Y 国债/ERP，refresh.py 刷新）
 
 约定：
 - sw_code 统一为纯数字 6 位（剥掉 .SI）。
@@ -149,6 +150,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
             trade_date TEXT NOT NULL,
             close      REAL NOT NULL,
             PRIMARY KEY (code, trade_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS erp (
+            index_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            pe         REAL,
+            ey         REAL,
+            rf         REAL,
+            erp        REAL,
+            PRIMARY KEY (index_code, trade_date)
         );
         """)
     conn.commit()
@@ -322,6 +333,40 @@ def upsert_valuation_rows(conn, rows: Iterable[tuple]) -> int:
         '(?, ?, ?, ?, ?, ?, ?)',
         rows,
     )
+
+
+def upsert_erp_rows(conn, rows: Iterable[tuple]) -> int:
+    """批量写 ERP 估值环境。rows 每项 (index_code, trade_date, pe, ey, rf, erp)。"""
+    return _insert_ignore(
+        conn, 'erp',
+        '(index_code, trade_date, pe, ey, rf, erp)',
+        '(?, ?, ?, ?, ?, ?)',
+        rows,
+    )
+
+
+def get_erp_series(index_code: str, as_of_date: Optional[str] = None,
+                   conn=None) -> list:
+    """取某指数 ERP 序列（trade_date 升序），rf/erp 可能为 None。
+
+    as_of_date=None 取到最新；否则只取 trade_date <= as_of_date（回放对齐）。
+    连接约定与 build_width_dict 等查询助手一致（conn 缺省时自连自关）。"""
+    own = conn is None
+    if own:
+        conn = connect()
+    try:
+        if as_of_date:
+            return conn.execute(
+                'SELECT trade_date, pe, ey, rf, erp FROM erp '
+                'WHERE index_code = ? AND trade_date <= ? ORDER BY trade_date',
+                (index_code, as_of_date)).fetchall()
+        return conn.execute(
+            'SELECT trade_date, pe, ey, rf, erp FROM erp '
+            'WHERE index_code = ? ORDER BY trade_date',
+            (index_code,)).fetchall()
+    finally:
+        if own:
+            conn.close()
 
 
 def get_max_trade_date(conn: sqlite3.Connection, sw_code: str) -> Optional[str]:

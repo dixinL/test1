@@ -1,11 +1,12 @@
 """general-data 基础数据统一刷新入口。
 
-把 6 张表（industry / price / width / congestion / valuation / index_daily）
+把 7 张表（industry / price / width / congestion / valuation / index_daily / erp）
 的增量刷新集中在一个入口，供 run.py 第 0 步调度，也可手动运行：
 
 用法:
     python refresh.py                # 全量刷新（含估值，最慢）
     python refresh.py --no-valuation # 跳过估值（日常够用，速度快）
+    python refresh.py --no-erp       # 跳过 ERP 估值环境
     python refresh.py --days-back 30 # 指定乐咕宽度/拥挤度回看天数
     python refresh.py --valuation-since 20260101  # 估值区间回填起点 (YYYYMMDD)
     python refresh.py --purge        # 清除 5 年滚动窗口外行情并 VACUUM
@@ -104,12 +105,20 @@ def refresh_index(conn) -> int:
     return n
 
 
+def refresh_erp(conn) -> int:
+    """ERP 估值环境（沪深300 PE + 10Y 国债）。全历史拉取，幂等增量。"""
+    n = swfetch.fetch_and_store_erp(conn)
+    print('[refresh] erp: 新增 {} 行'.format(n))
+    return n
+
+
 def purge_old_data(conn, today: date) -> int:
     """清除滚动窗口（RETAIN_YEARS 年）外的行情数据并 VACUUM 瘦身。
 
     覆盖所有带 trade_date 的行情表（price/width/congestion/valuation/
     index_daily）；维表/参数表（industry/trend/epsilon）量小且与窗口无关，
-    不清。删除发生才 VACUUM。返回删除行数。"""
+    erp 表不纳入清理——ERP 分位计算需要 10 年以上长历史。不清。删除发生才
+    VACUUM。返回删除行数。"""
     cutoff = today.replace(year=today.year - RETAIN_YEARS).isoformat()
     deleted = 0
     for table in ('price', 'width', 'congestion', 'valuation', 'index_daily'):
@@ -134,6 +143,7 @@ def show_stats(conn) -> int:
         ('congestion', 'trade_date'),
         ('valuation', 'trade_date'),
         ('index_daily', 'trade_date'),
+        ('erp', 'trade_date'),
         ('trend', 'calc_date'),
         ('epsilon', 'updated_at'),
     ]
@@ -156,6 +166,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='general-data 基础数据统一刷新')
     parser.add_argument('--no-valuation', action='store_true',
                         help='跳过估值表（估值拉取最慢，日常刷新可跳过）')
+    parser.add_argument('--no-erp', action='store_true',
+                        help='跳过 ERP 估值环境刷新（沪深300 PE + 10Y 国债）')
     parser.add_argument('--days-back', type=int, default=40,
                         help='乐咕宽度/拥挤度回看自然日数（默认 40）')
     parser.add_argument('--valuation-since', type=str, default=None,
@@ -202,6 +214,12 @@ def main() -> int:
         refresh_index(conn)
     except Exception as e:
         print('[refresh] [WARN] index 刷新失败: {}'.format(e))
+
+    if not args.no_erp:
+        try:
+            refresh_erp(conn)
+        except Exception as e:
+            print('[refresh] [WARN] erp 刷新失败: {}'.format(e))
 
     if not args.no_valuation:
         try:

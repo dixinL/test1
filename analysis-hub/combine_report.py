@@ -195,7 +195,11 @@ def extract_daily_state(report_path):
     m9 = re.search(r'大盘九场景[:：]\s*(.+)', section)
     mkt_scene = m9.group(1).strip().replace('**', '') if m9 else ''
 
-    state = {'section': section, 'verdict': verdict, 'mkt_scene': mkt_scene}
+    me = re.search(r'ERP 估值环境[:：]\s*(.+)', section)
+    erp_line = me.group(1).strip().replace('**', '') if me else ''
+
+    state = {'section': section, 'verdict': verdict, 'mkt_scene': mkt_scene,
+             'erp': erp_line}
 
     for b in re.split(r'^###\s*', section, flags=re.M):
         if b.startswith('市场宽度'):
@@ -629,6 +633,10 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
     mkt_scene = (daily_state or {}).get('mkt_scene')
     if mkt_scene:
         out.append('- 大盘九场景：{}'.format(mkt_scene))
+    # ERP 估值环境：股债性价比辅助层（沪深300 EY − 10Y 国债），仅展示不参与档位判定
+    erp_line = (daily_state or {}).get('erp')
+    if erp_line:
+        out.append('- ERP 估值环境：{}'.format(erp_line))
     out.append('### 综合建议')
     out.append('- 综合判断：{}。'.format(overall_txt))
     if o_line:

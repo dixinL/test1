@@ -4,10 +4,14 @@
 其余删除。仅总览性质的 combined_*.md（analysis-hub 整合报告）永久保留，
 不在此修剪；RSS 为单文件滚动覆盖，无需处理。
 
-覆盖范围（与 daily.yml git add 路径一致，删除会随 CI 提交）:
+覆盖范围（每日工具产物，统一保留最新 60 个交易日）:
   sw2-daily-report/report/env_summary_YYYY-MM-DD.csv        (test2 消费)
   sw2-daily-report/report/action_report_YYYY-MM-DD.md       (日报工具产物，RSS/推送只读最新)
   sw2-trend-analysis/data/exports/sw_trend_summary_YYYY-MM-DD.csv (test2 消费)
+  sw2-daily-report/width/width_YYYY-MM-DD_heatmap.html       (回放/热力图 html)
+  sw2-daily-report/congestion/congestion_YYYY-MM-DD_heatmap.html (同上)
+
+仅总览性质的 combined_*.md 永久保留不修剪；RSS 为单文件滚动覆盖。
 
 快照只在交易日生成，"最新 KEEP 个文件"即最近 KEEP 个开盘日。
 可独立运行补救:  python prune_snapshots.py
@@ -26,6 +30,8 @@ TARGETS = [
     (os.path.join(REPO_DIR, 'sw2-daily-report', 'report'), 'action_report_'),
     (os.path.join(REPO_DIR, 'sw2-trend-analysis', 'data', 'exports'),
      'sw_trend_summary_'),
+    (os.path.join(REPO_DIR, 'sw2-daily-report', 'width'), 'width_'),
+    (os.path.join(REPO_DIR, 'sw2-daily-report', 'congestion'), 'congestion_'),
 ]
 
 

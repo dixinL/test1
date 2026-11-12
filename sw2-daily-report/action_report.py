@@ -12,7 +12,7 @@ import sys
 import subprocess
 
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 
 import db
@@ -58,6 +58,11 @@ QUOTES_DIR = os.path.join(BASE_DIR, 'quotes')
 CONGESTION_DIR = os.path.join(BASE_DIR, 'congestion')
 
 HISTORY_DAYS = 7
+
+# ERP 估值环境（辅助层，仅展示）：沪深300 盈利收益率 − 10Y 国债收益率
+ERP_INDEX_CODE = '000300'
+ERP_WINDOW_YEARS = 10    # 分位近端窗口（年）
+ERP_WINDOW_DAYS = 3652   # 同上换算自然日（10 年含闰年）
 
 WIDTH_THRESHOLD = 60
 CONGESTION_THRESHOLD = 60
@@ -932,7 +937,9 @@ def get_sw1(name):
 
 print('分析历史趋势...')
 industries = []
-all_codes = set(w['maMarketWidth'].keys()) | set(c['congestions'].keys())
+# 排序后遍历：set 并集顺序受哈希随机化影响，不排序会导致行业遍历序、
+# 偏稳细分插入序、场景表取前 N 行在跨进程间抖动（逐字节可复现性前提）。
+all_codes = sorted(set(w['maMarketWidth'].keys()) | set(c['congestions'].keys()))
 for code in all_codes:
     name = code_to_name.get(code, code)
     width_data = w['maMarketWidth'].get(code, [])
@@ -1105,7 +1112,7 @@ if stable_cnt > 0:
         if '偏稳' in st:
             stable_types[st] = stable_types.get(st, 0) + 1
     if stable_types:
-        sorted_stable = sorted(stable_types.items(), key=lambda x: -x[1])
+        sorted_stable = sorted(stable_types.items(), key=lambda x: (-x[1], x[0]))
         detail = '  '.join(['{}:{}'.format(k, v) for k, v in sorted_stable])
         md.append('- ☆偏稳细分: {}'.format(detail))
 md.append('')
@@ -1136,6 +1143,28 @@ mkt_scene_name, _m, mkt_scene_act = SCENE_MATRIX.get(
     (mkt_w_num, mkt_c_num), ('未知场景', 'gray', ''))
 md.append('- 大盘九场景：**{}**（宽度{} + 高拥挤行业占比{} {:.0%}）→ {}'.format(
     mkt_scene_name, mkt_w_lbl, mkt_c_lbl, hi_crowd_share, mkt_scene_act))
+
+# ERP 估值环境（辅助层）：剥离利率环境的估值锚。仅展示，不参与 4 档判断
+# 与九场景归类；数据缺失（含回放早于数据起点）时整行省略。分位口径：
+# 序列内 erp <= 当前值 的占比，近端窗口与全历史各算一次。
+try:
+    _erp_rows = db.get_erp_series(ERP_INDEX_CODE, as_of_date=AS_OF_DATE)
+except Exception:
+    _erp_rows = []
+_erp_valid = [r for r in _erp_rows if r['erp'] is not None]
+if _erp_valid:
+    _last = _erp_valid[-1]
+    _cur = _last['erp']
+    _cutoff = (datetime.strptime(_last['trade_date'], '%Y-%m-%d')
+               - timedelta(days=ERP_WINDOW_DAYS)).strftime('%Y-%m-%d')
+    _w_vals = [r['erp'] for r in _erp_valid if r['trade_date'] >= _cutoff]
+    _a_vals = [r['erp'] for r in _erp_valid]
+    _pct_w = sum(1 for v in _w_vals if v <= _cur) / len(_w_vals) * 100
+    _pct_a = sum(1 for v in _a_vals if v <= _cur) / len(_a_vals) * 100
+    md.append('- ERP 估值环境：沪深300 PE {:.2f} → EY {:.2f}% − 10Y国债 {:.2f}% = **{:.2f}%**'
+              '（近{}年分位 {:.1f}% | 全历史分位 {:.1f}% | 截至 {}）'.format(
+                  _last['pe'], _last['ey'], _last['rf'], _cur,
+                  ERP_WINDOW_YEARS, _pct_w, _pct_a, _last['trade_date']))
 md.append('')
 md.append('---')
 md.append('')
@@ -1155,7 +1184,7 @@ for sk in SCENE_KEYS:
         for i in stable_list:
             st = i.get('signal_type', '')
             sub_counts[st] = sub_counts.get(st, 0) + 1
-        sorted_sub = sorted(sub_counts.items(), key=lambda x: -x[1])
+        sorted_sub = sorted(sub_counts.items(), key=lambda x: (-x[1], x[0]))
         detail_parts = ['{}{}'.format(k, v) for k, v in sorted_sub]
         stable_detail = ' '.join(detail_parts)
     scene_name = slist[0]['scene'] if slist else sk.replace(':', '')
@@ -1218,7 +1247,7 @@ def print_scene_table(title, scene_list, trend_list, stable_list=None, max_rows=
         for i in stable_list:
             st = i.get('signal_type', '')
             sub_counts[st] = sub_counts.get(st, 0) + 1
-        sorted_sub = sorted(sub_counts.items(), key=lambda x: -x[1])
+        sorted_sub = sorted(sub_counts.items(), key=lambda x: (-x[1], x[0]))
         detail_parts = ['{}{}'.format(k, v) for k, v in sorted_sub]
         md.append('- ☆偏稳细分: {}'.format('  '.join(detail_parts)))
     md.append('- 操作: **{}**'.format(action_desc))
@@ -1287,7 +1316,8 @@ md.append('')
 md.append('| 一级行业 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | 总数 | 主导 | 趋势/偶发 |')
 md.append('|----------|----|----|----|----|----|----|----|----|----|------|------|-----------|')
 
-for sw1 in sorted(sw1_scene_count.keys(), key=lambda x: -sum(sw1_scene_count[x].values())):
+for sw1 in sorted(sw1_scene_count.keys(),
+                  key=lambda x: (-sum(sw1_scene_count[x].values()), x)):
     cnt = sw1_scene_count[sw1]
     total_sw1 = sum(cnt.values())
     dominant = max(cnt.items(), key=lambda x: x[1])

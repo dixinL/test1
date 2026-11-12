@@ -32,3 +32,4 @@ build_width_dict = swdb.build_width_dict
 build_congestion_dict = swdb.build_congestion_dict
 build_quotes_df = swdb.build_quotes_df
 latest_trade_date = swdb.latest_trade_date
+get_erp_series = swdb.get_erp_series
