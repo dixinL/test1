@@ -169,15 +169,20 @@ def init_schema(conn: sqlite3.Connection) -> None:
             indicator  TEXT NOT NULL,
             trade_date TEXT NOT NULL,
             value      REAL,
+            label      TEXT,
             PRIMARY KEY (indicator, trade_date)
         );
         """)
-    # 旧库迁移：index_daily 扩列 volume/amount（建表语句只对新库生效）
+    # 旧库迁移：index_daily 扩列 volume/amount、env_daily 扩列 label
+    # （建表语句只对新库生效）
     cols = {r[1] for r in conn.execute('PRAGMA table_info(index_daily)')}
     if 'volume' not in cols:
         conn.execute('ALTER TABLE index_daily ADD COLUMN volume REAL')
     if 'amount' not in cols:
         conn.execute('ALTER TABLE index_daily ADD COLUMN amount REAL')
+    cols = {r[1] for r in conn.execute('PRAGMA table_info(env_daily)')}
+    if 'label' not in cols:
+        conn.execute('ALTER TABLE env_daily ADD COLUMN label TEXT')
     conn.commit()
 
 
@@ -345,12 +350,19 @@ def upsert_index_daily(conn: sqlite3.Connection, code: str, name: str,
 
 
 def upsert_env_rows(conn, indicator: str, rows: Iterable[tuple]) -> int:
-    """批量写市场环境指标窄表。rows 每项 (trade_date, value)。返回新增行数。"""
+    """批量写市场环境指标窄表。返回新增行数。
+
+    rows 每项 (trade_date, value) 或 (trade_date, value, label)；
+    label 为可选文本注记（如 mainline_names 的 Top5 行业名单串）。"""
+    norm = []
+    for t in rows:
+        label = t[2] if len(t) > 2 else None
+        norm.append((str(indicator), t[0], t[1], label))
     return _insert_ignore(
         conn, 'env_daily',
-        '(indicator, trade_date, value)',
-        '(?, ?, ?)',
-        [(str(indicator), d, v) for d, v in rows],
+        '(indicator, trade_date, value, label)',
+        '(?, ?, ?, ?)',
+        norm,
     )
 
 
@@ -358,6 +370,7 @@ def get_env_series(indicator: str, as_of_date: Optional[str] = None,
                    conn=None) -> list:
     """取某环境指标序列（trade_date 升序），value 可能为 None。
 
+    返回行含 label 列（纯数值指标为 None）。
     as_of_date=None 取到最新；否则只取 trade_date <= as_of_date（回放对齐）。
     连接约定与 get_erp_series 一致（conn 缺省时自连自关）。"""
     own = conn is None
@@ -366,11 +379,11 @@ def get_env_series(indicator: str, as_of_date: Optional[str] = None,
     try:
         if as_of_date:
             return conn.execute(
-                'SELECT trade_date, value FROM env_daily '
+                'SELECT trade_date, value, label FROM env_daily '
                 'WHERE indicator = ? AND trade_date <= ? ORDER BY trade_date',
                 (indicator, as_of_date)).fetchall()
         return conn.execute(
-            'SELECT trade_date, value FROM env_daily '
+            'SELECT trade_date, value, label FROM env_daily '
             'WHERE indicator = ? ORDER BY trade_date',
             (indicator,)).fetchall()
     finally:

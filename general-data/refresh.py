@@ -134,42 +134,49 @@ def refresh_vol20(conn) -> int:
 
 
 def refresh_mainline(conn, top_n=5, window=20) -> int:
-    """主线结构（辅助层）：基于 price 表全部行业现算近 {} 日涨幅。
+    """主线结构（辅助层）：基于 price 表全部行业现算近 20 日涨幅。
 
-    存两个指标——mainline_top5：Top{} 行业均值（主线强度）；
-    mainline_disp：Top{} 均值 − 全体行业中位数（离散度，越大主线越清晰）。
+    存三个指标——mainline_top5：Top{} 行业均值（主线强度）；
+    mainline_disp：Top{} 均值 − 全体行业中位数（离散度，越大主线越清晰）；
+    mainline_names：Top{} 行业名单（value=强度，label=名单串）。
     全量重算 + INSERT OR IGNORE 幂等。"""
     dates = [r['trade_date'] for r in conn.execute(
         'SELECT DISTINCT trade_date FROM price ORDER BY trade_date')]
     idx = {d: i for i, d in enumerate(dates)}
     aligned = {}
     for r in conn.execute(
-            'SELECT sw_code, trade_date, close FROM price ORDER BY trade_date'):
-        vals = aligned.setdefault(r['sw_code'], [None] * len(dates))
+            'SELECT p.sw_code, COALESCE(i.sw_name, p.sw_name) AS name, '
+            'p.trade_date, p.close FROM price p '
+            'LEFT JOIN industry i ON i.sw_code = p.sw_code ORDER BY p.trade_date'):
+        name, vals = aligned.setdefault(r['sw_code'], (r['name'], [None] * len(dates)))
         i = idx.get(r['trade_date'])
         if i is not None:
             vals[i] = r['close']
 
-    top5_rows, disp_rows = [], []
+    top5_rows, disp_rows, names_rows = [], [], []
     for i in range(window, len(dates)):
         chgs = []
-        for vals in aligned.values():
+        for code, (name, vals) in aligned.items():
             c_now, c_prev = vals[i], vals[i - window]
             if c_now and c_prev:
-                chgs.append((c_now / c_prev - 1) * 100)
+                chgs.append(((c_now / c_prev - 1) * 100, name or code, code))
         if len(chgs) < 10:
             continue
         chgs.sort(reverse=True)
-        top5 = sum(chgs[:top_n]) / top_n
-        m = len(chgs)
-        median = chgs[m // 2] if m % 2 else (chgs[m // 2 - 1] + chgs[m // 2]) / 2
+        top5 = sum(c[0] for c in chgs[:top_n]) / top_n
+        srt = sorted(c[0] for c in chgs)
+        m = len(srt)
+        median = srt[m // 2] if m % 2 else (srt[m // 2 - 1] + srt[m // 2]) / 2
         top5_rows.append((dates[i], round(top5, 2)))
         disp_rows.append((dates[i], round(top5 - median, 2)))
+        names_rows.append((dates[i], round(top5, 2),
+                           '/'.join(c[1] for c in chgs[:top_n])))
     n1 = swdb.upsert_env_rows(conn, 'mainline_top5', top5_rows)
     n2 = swdb.upsert_env_rows(conn, 'mainline_disp', disp_rows)
-    print('[refresh] mainline: 重算 {} 行 · 新增 top5 {} / disp {} 行'.format(
-        len(top5_rows), n1, n2))
-    return n1 + n2
+    n3 = swdb.upsert_env_rows(conn, 'mainline_names', names_rows)
+    print('[refresh] mainline: 重算 {} 行 · 新增 top5 {} / disp {} / names {} 行'.format(
+        len(top5_rows), n1, n2, n3))
+    return n1 + n2 + n3
 
 
 def refresh_env(conn) -> dict:

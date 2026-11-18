@@ -168,14 +168,39 @@ def build_env_dashboard(as_of_date=None):
     if mt:
         top5 = mt[-1][1]
         disp = mdisp[-1][1] if mdisp else None
-        label = _mainline_label(top5, disp)
+        names_row = _latest_label('mainline_names', as_of_date)
+        names_txt = ''
+        if names_row is not None and names_row['label']:
+            names_txt = '主线：{} · '.format(names_row['label'])
         if disp is not None:
-            lines.append('- 主线强度（Top5 均值）{:.2f}% · 离散度 {:+.2f}% → **{}**'.format(
-                top5, disp, label or '样本不足'))
+            lines.append('- {}主线强度 {:.2f}% · 离散度 {:+.2f}% → **{}**'.format(
+                names_txt, top5, disp, _mainline_label(top5, disp) or '样本不足'))
         else:
-            lines.append('- 主线强度（Top5 均值）{:.2f}%'.format(top5))
+            lines.append('- {}主线强度（Top5 均值）{:.2f}%'.format(names_txt, top5))
     lines.append('')
     return base, '\n'.join(lines)
+
+
+def _latest_label(indicator, as_of):
+    """取某指标最新非空行的 Row（含 label 列）；无数据/异常返回 None。"""
+    try:
+        rows = envdb.get_env_series(indicator, as_of_date=as_of)
+    except Exception:
+        return None
+    rows = [r for r in rows if r['value'] is not None]
+    return rows[-1] if rows else None
+
+
+def _mainline_text(top5, disp, names_row):
+    """主线片段：有名单时 `主线：{名单}（强度 x · 离散度 ±x → 档位）`，
+    否则回退 `主线强度 x · 离散度 ±x → 档位`。disp 缺失返回 None。"""
+    if disp is None:
+        return None
+    tail = '强度 {:.2f}% · 离散度 {:+.2f}% → {}'.format(
+        top5, disp, _mainline_label(top5, disp) or '样本不足')
+    if names_row is not None and names_row['label']:
+        return '主线：{}（{}）'.format(names_row['label'], tail)
+    return '主线强度 ' + tail
 
 
 def build_env_lines(as_of_date=None):
@@ -227,10 +252,10 @@ def build_env_lines(as_of_date=None):
     if mt:
         top5 = mt[-1][1]
         disp = mdisp[-1][1] if mdisp else None
-        lbl = _mainline_label(top5, disp)
-        if disp is not None:
-            parts.append('主线强度 {:.2f}% · 离散度 {:+.2f}% → {}'.format(
-                top5, disp, lbl or '样本不足'))
+        names_row = _latest_label('mainline_names', as_of_date)
+        mtxt = _mainline_text(top5, disp, names_row)
+        if mtxt:
+            parts.append(mtxt)
     line2 = '- 广度与主线：' + ' | '.join(parts) if parts else None
 
     lines = [l for l in (line1, line2) if l]
