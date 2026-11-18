@@ -1,18 +1,19 @@
 """general-data 基础数据统一刷新入口。
 
-把 7 张表（industry / price / width / congestion / valuation / index_daily / erp）
-的增量刷新集中在一个入口，供 run.py 第 0 步调度，也可手动运行：
+把 8 张表（industry / price / width / congestion / valuation / index_daily /
+erp / env_daily）的增量刷新集中在一个入口，供 run.py 第 0 步调度，也可手动运行：
 
 用法:
     python refresh.py                # 全量刷新（含估值，最慢）
     python refresh.py --no-valuation # 跳过估值（日常够用，速度快）
     python refresh.py --no-erp       # 跳过 ERP 估值环境
+    python refresh.py --no-env       # 跳过市场环境指标（利率/量能/波动/广度/主线）
     python refresh.py --days-back 30 # 指定乐咕宽度/拥挤度回看天数
     python refresh.py --valuation-since 20260101  # 估值区间回填起点 (YYYYMMDD)
     python refresh.py --purge        # 清除 5 年滚动窗口外行情并 VACUUM
     python refresh.py --stats        # 只打印各表覆盖情况，不刷新
 
-写入全部幂等：price 只补新日期；width/congestion/valuation 主键冲突
+写入全部幂等：price 只补新日期；width/congestion/valuation/env_daily 主键冲突
 原样保留；重复运行"新增 0 行"即代表已就绪。
 """
 from __future__ import annotations
@@ -112,16 +113,90 @@ def refresh_erp(conn) -> int:
     return n
 
 
+def refresh_vol20(conn) -> int:
+    """波动率（辅助层）：上证指数 20 日已实现波动率（年化%，样本标准差×√250）。
+
+    基于 index_daily 收盘序列全量重算 + INSERT OR IGNORE 幂等。"""
+    rows = conn.execute(
+        "SELECT trade_date, close FROM index_daily WHERE code = 'sh000001' "
+        'ORDER BY trade_date').fetchall()
+    closes = [(r['trade_date'], r['close']) for r in rows]
+    out = []
+    for i in range(20, len(closes)):
+        rets = [(closes[j][1] / closes[j - 1][1] - 1) * 100
+                for j in range(i - 19, i + 1)]
+        mean = sum(rets) / len(rets)
+        var = sum((x - mean) ** 2 for x in rets) / (len(rets) - 1)
+        out.append((closes[i][0], round((var ** 0.5) * (250 ** 0.5), 2)))
+    n = swdb.upsert_env_rows(conn, 'vol20', out)
+    print('[refresh] vol20: 重算 {} 行 · 新增 {} 行'.format(len(out), n))
+    return n
+
+
+def refresh_mainline(conn, top_n=5, window=20) -> int:
+    """主线结构（辅助层）：基于 price 表全部行业现算近 {} 日涨幅。
+
+    存两个指标——mainline_top5：Top{} 行业均值（主线强度）；
+    mainline_disp：Top{} 均值 − 全体行业中位数（离散度，越大主线越清晰）。
+    全量重算 + INSERT OR IGNORE 幂等。"""
+    dates = [r['trade_date'] for r in conn.execute(
+        'SELECT DISTINCT trade_date FROM price ORDER BY trade_date')]
+    idx = {d: i for i, d in enumerate(dates)}
+    aligned = {}
+    for r in conn.execute(
+            'SELECT sw_code, trade_date, close FROM price ORDER BY trade_date'):
+        vals = aligned.setdefault(r['sw_code'], [None] * len(dates))
+        i = idx.get(r['trade_date'])
+        if i is not None:
+            vals[i] = r['close']
+
+    top5_rows, disp_rows = [], []
+    for i in range(window, len(dates)):
+        chgs = []
+        for vals in aligned.values():
+            c_now, c_prev = vals[i], vals[i - window]
+            if c_now and c_prev:
+                chgs.append((c_now / c_prev - 1) * 100)
+        if len(chgs) < 10:
+            continue
+        chgs.sort(reverse=True)
+        top5 = sum(chgs[:top_n]) / top_n
+        m = len(chgs)
+        median = chgs[m // 2] if m % 2 else (chgs[m // 2 - 1] + chgs[m // 2]) / 2
+        top5_rows.append((dates[i], round(top5, 2)))
+        disp_rows.append((dates[i], round(top5 - median, 2)))
+    n1 = swdb.upsert_env_rows(conn, 'mainline_top5', top5_rows)
+    n2 = swdb.upsert_env_rows(conn, 'mainline_disp', disp_rows)
+    print('[refresh] mainline: 重算 {} 行 · 新增 top5 {} / disp {} 行'.format(
+        len(top5_rows), n1, n2))
+    return n1 + n2
+
+
+def refresh_env(conn) -> dict:
+    """市场环境指标（辅助层）：抓取利率/量能/广度 + 现算波动率/主线。
+
+    us10y / dr007 / high20 / low20 / turnover 由 swfetch.fetch_and_store_env
+    抓取；vol20 / mainline_top5 / mainline_disp 从库内数据现算。"""
+    stats = swfetch.fetch_and_store_env(conn)
+    print('[refresh] env: ' + ' · '.join(
+        '{} {}'.format(k, v) for k, v in sorted(stats.items())))
+    refresh_vol20(conn)
+    refresh_mainline(conn)
+    return stats
+
+
 def purge_old_data(conn, today: date) -> int:
     """清除滚动窗口（RETAIN_YEARS 年）外的行情数据并 VACUUM 瘦身。
 
     覆盖所有带 trade_date 的行情表（price/width/congestion/valuation/
-    index_daily）；维表/参数表（industry/trend/epsilon）量小且与窗口无关，
-    erp 表不纳入清理——ERP 分位计算需要 10 年以上长历史。不清。删除发生才
-    VACUUM。返回删除行数。"""
+    index_daily）与环境指标表 env_daily/erp——环境指标与 ERP 统一跟随
+    5 年滚动窗口，抓取层（swfetch.env_cutoff_date）入库前同步过滤，
+    窗口外旧行不会被刷新灌回。维表/参数表（industry/trend/epsilon）量小
+    且与窗口无关，不参与。删除发生才 VACUUM。返回删除行数。"""
     cutoff = today.replace(year=today.year - RETAIN_YEARS).isoformat()
     deleted = 0
-    for table in ('price', 'width', 'congestion', 'valuation', 'index_daily'):
+    for table in ('price', 'width', 'congestion', 'valuation', 'index_daily',
+                  'env_daily', 'erp'):
         cur = conn.execute(
             'DELETE FROM {} WHERE trade_date < ?'.format(table), (cutoff,))
         deleted += cur.rowcount
@@ -144,6 +219,7 @@ def show_stats(conn) -> int:
         ('valuation', 'trade_date'),
         ('index_daily', 'trade_date'),
         ('erp', 'trade_date'),
+        ('env_daily', 'trade_date'),
         ('trend', 'calc_date'),
         ('epsilon', 'updated_at'),
     ]
@@ -168,6 +244,8 @@ def main() -> int:
                         help='跳过估值表（估值拉取最慢，日常刷新可跳过）')
     parser.add_argument('--no-erp', action='store_true',
                         help='跳过 ERP 估值环境刷新（沪深300 PE + 10Y 国债）')
+    parser.add_argument('--no-env', action='store_true',
+                        help='跳过市场环境指标刷新（利率/量能/波动/广度/主线）')
     parser.add_argument('--days-back', type=int, default=40,
                         help='乐咕宽度/拥挤度回看自然日数（默认 40）')
     parser.add_argument('--valuation-since', type=str, default=None,
@@ -220,6 +298,12 @@ def main() -> int:
             refresh_erp(conn)
         except Exception as e:
             print('[refresh] [WARN] erp 刷新失败: {}'.format(e))
+
+    if not args.no_env:
+        try:
+            refresh_env(conn)
+        except Exception as e:
+            print('[refresh] [WARN] env 刷新失败: {}'.format(e))
 
     if not args.no_valuation:
         try:

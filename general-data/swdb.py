@@ -9,6 +9,7 @@
 - epsilon   死区阈值（trend）
 - valuation 估值指标 PE/PB/股息率（申万官方日线，refresh.py 顺手刷新）
 - erp      沪深300 ERP 估值环境（PE/EY/10Y 国债/ERP，refresh.py 刷新）
+- env_daily 市场环境指标窄表（利率/量能/波动/广度/主线，indicator+date 主键）
 
 约定：
 - sw_code 统一为纯数字 6 位（剥掉 .SI）。
@@ -149,6 +150,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             name       TEXT,
             trade_date TEXT NOT NULL,
             close      REAL NOT NULL,
+            volume     REAL,
+            amount     REAL,
             PRIMARY KEY (code, trade_date)
         );
 
@@ -161,7 +164,20 @@ def init_schema(conn: sqlite3.Connection) -> None:
             erp        REAL,
             PRIMARY KEY (index_code, trade_date)
         );
+
+        CREATE TABLE IF NOT EXISTS env_daily (
+            indicator  TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            value      REAL,
+            PRIMARY KEY (indicator, trade_date)
+        );
         """)
+    # 旧库迁移：index_daily 扩列 volume/amount（建表语句只对新库生效）
+    cols = {r[1] for r in conn.execute('PRAGMA table_info(index_daily)')}
+    if 'volume' not in cols:
+        conn.execute('ALTER TABLE index_daily ADD COLUMN volume REAL')
+    if 'amount' not in cols:
+        conn.execute('ALTER TABLE index_daily ADD COLUMN amount REAL')
     conn.commit()
 
 
@@ -299,13 +315,67 @@ def upsert_price_series(conn, code6: str, series_rows: Iterable[tuple]) -> int:
 
 def upsert_index_daily(conn: sqlite3.Connection, code: str, name: str,
                        rows: Iterable[tuple]) -> int:
-    """写入大盘指数日线（rows 每项 (trade_date, close)）。返回新增行数。"""
+    """写入大盘指数日线（UPSERT，支持扩列回填）。返回影响行数。
+
+    rows 每项 (trade_date, close) 或 (trade_date, close, volume, amount)。
+    volume/amount 单位：手 / 元。ON CONFLICT 时 close 覆盖、volume/amount
+    以 COALESCE 保旧（增量两元组调用不会抹掉已回填的数量列）。"""
+    norm = []
+    for t in rows:
+        if len(t) == 2:
+            norm.append((str(code), name, t[0], float(t[1]), None, None))
+        else:
+            norm.append((str(code), name, t[0], float(t[1]),
+                         float(t[2]) if t[2] is not None else None,
+                         float(t[3]) if t[3] is not None else None))
+    if not norm:
+        return 0
+    before = conn.total_changes
+    conn.executemany("""
+        INSERT INTO index_daily (code, name, trade_date, close, volume, amount)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(code, trade_date) DO UPDATE SET
+            name   = excluded.name,
+            close  = excluded.close,
+            volume = COALESCE(excluded.volume, index_daily.volume),
+            amount = COALESCE(excluded.amount, index_daily.amount)
+        """, norm)
+    conn.commit()
+    return conn.total_changes - before
+
+
+def upsert_env_rows(conn, indicator: str, rows: Iterable[tuple]) -> int:
+    """批量写市场环境指标窄表。rows 每项 (trade_date, value)。返回新增行数。"""
     return _insert_ignore(
-        conn, 'index_daily',
-        '(code, name, trade_date, close)',
-        '(?, ?, ?, ?)',
-        [(str(code), name, d, float(c)) for d, c in rows],
+        conn, 'env_daily',
+        '(indicator, trade_date, value)',
+        '(?, ?, ?)',
+        [(str(indicator), d, v) for d, v in rows],
     )
+
+
+def get_env_series(indicator: str, as_of_date: Optional[str] = None,
+                   conn=None) -> list:
+    """取某环境指标序列（trade_date 升序），value 可能为 None。
+
+    as_of_date=None 取到最新；否则只取 trade_date <= as_of_date（回放对齐）。
+    连接约定与 get_erp_series 一致（conn 缺省时自连自关）。"""
+    own = conn is None
+    if own:
+        conn = connect()
+    try:
+        if as_of_date:
+            return conn.execute(
+                'SELECT trade_date, value FROM env_daily '
+                'WHERE indicator = ? AND trade_date <= ? ORDER BY trade_date',
+                (indicator, as_of_date)).fetchall()
+        return conn.execute(
+            'SELECT trade_date, value FROM env_daily '
+            'WHERE indicator = ? ORDER BY trade_date',
+            (indicator,)).fetchall()
+    finally:
+        if own:
+            conn.close()
 
 
 def upsert_prices(conn: sqlite3.Connection, rows: Iterable[tuple]) -> int:

@@ -382,10 +382,12 @@ def fetch_and_store_erp(conn, index_code: str = ERP_INDEX_CODE) -> int:
     """拉取沪深300 PE 与 10Y 国债收益率，合成 ERP 行并写库。返回新增行数。
 
     EY = 100/PE_TTM（盈利收益率%），ERP = EY − 10Y 国债收益率。
-    无国债数据对应日期的 rf/erp 留空（pe/ey 仍入库）。全历史拉取 +
-    INSERT OR IGNORE，重复运行"新增 0 行"即就绪。"""
-    pe_rows = fetch_hs300_pe()
-    rf_map = fetch_bond_10y()
+    无国债数据对应日期的 rf/erp 留空（pe/ey 仍入库）。INSERT OR IGNORE，
+    仅保留 ENV_RETAIN_YEARS 窗口内数据（与 purge 同口径），
+    重复运行"新增 0 行"即就绪。"""
+    cutoff = env_cutoff_date()
+    pe_rows = [t for t in fetch_hs300_pe() if t[0] >= cutoff]
+    rf_map = {d: v for d, v in fetch_bond_10y().items() if d >= cutoff}
     rows = []
     for d, pe in pe_rows:
         ey = round(100.0 / pe, 4)
@@ -393,3 +395,220 @@ def fetch_and_store_erp(conn, index_code: str = ERP_INDEX_CODE) -> int:
         erp = round(ey - rf, 4) if rf is not None else None
         rows.append((index_code, d, pe, ey, rf, erp))
     return swdb.upsert_erp_rows(conn, rows)
+
+
+# — 市场环境指标（辅助层：利率 / 量能 / 广度）—
+
+# 数据保留窗口：环境指标与 ERP 统一跟随 sw.db 的 5 年滚动窗口
+# （与 refresh.py 的 RETAIN_YEARS、purge_old_data 同口径），抓取层入库前
+# 过滤窗口外旧行，否则全量接口每次刷新都会把 purge 剪掉的历史灌回来。
+ENV_RETAIN_YEARS = 5
+
+# 10Y 美债等全球利率取自 bond_zh_us_rate 的美债列（中国 10Y 已入 erp 表 rf 列）
+US10Y_COLUMN = '美国国债收益率10年'
+DR007_START = '20140101'      # DR007 定盘利率 2014-12 起发布，空表回填起点
+# 两市成交额口径：沪市综合指数 + 深市综合指数（综指覆盖全市场，成指只含成分股）
+TURNOVER_INDEXES = (('sh000001', '上证指数'), ('sz399106', '深证综指'))
+
+
+def env_cutoff_date() -> str:
+    """环境指标/ERP 的数据窗口下限（今天 - ENV_RETAIN_YEARS，YYYY-MM-DD）。"""
+    t = date.today()
+    return t.replace(year=t.year - ENV_RETAIN_YEARS).strftime('%Y-%m-%d')
+
+
+def fetch_index_daily_full(symbol: str, beg: str, end: str) -> list:
+    """拉取指数日线（收盘+成交量+成交额，东财 kline）。
+
+    返回 [(trade_date, close, volume, amount)]；volume 单位手、amount 单位元。"""
+    secid = ('1.' if symbol.startswith('sh') else '0.') + symbol[2:]
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            r = requests.get(
+                INDEX_KLINE_URL,
+                params={'secid': secid, 'klt': '101', 'fqt': '1',
+                        'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
+                        'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53,f56,f57'},
+                timeout=15)
+            r.raise_for_status()
+            klines = (r.json().get('data') or {}).get('klines') or []
+            out = []
+            for k in klines:
+                parts = k.split(',')
+                if len(parts) < 4:
+                    continue
+                out.append((parts[0], float(parts[1]),
+                            float(parts[2] or 0), float(parts[3] or 0)))
+            return out
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        f'拉取指数(全字段) {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {last_err}')
+
+
+def fetch_us10y() -> dict:
+    """拉取 10 年期美债收益率全历史（单位 %），返回 {trade_date: value}。"""
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            df = ak.bond_zh_us_rate()
+            if df is None or df.empty:
+                raise ValueError('接口返回空数据')
+            out = {}
+            for _, r in df.iterrows():
+                d = str(r['日期'])[:10]
+                v = pd.to_numeric(r[US10Y_COLUMN], errors='coerce')
+                if d and pd.notna(v):
+                    out[d] = float(v)
+            if not out:
+                raise ValueError('美债收益率列({})无有效数据'.format(US10Y_COLUMN))
+            return out
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        '拉取 10Y 美债失败（重试 {} 次）: {}'.format(FETCH_MAX_RETRY, last_err))
+
+
+def _fetch_dr007_range(start_date: str, end_date: str) -> list:
+    """单区间拉取 DR007 定盘利率（FDR007，单位 %），返回 [(trade_date, value)]。"""
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            df = ak.repo_rate_hist(start_date=start_date, end_date=end_date)
+            if df is None or df.empty:
+                return []
+            out = []
+            for _, r in df.iterrows():
+                d = str(r['date'])[:10]
+                v = pd.to_numeric(r['FDR007'], errors='coerce')
+                if d and pd.notna(v):
+                    out.append((d, float(v)))
+            return sorted(out)
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        '拉取 DR007 失败（重试 {} 次）: {}'.format(FETCH_MAX_RETRY, last_err))
+
+
+def fetch_dr007(start_date: str, end_date: str) -> list:
+    """拉取 DR007 定盘利率（FDR007，中国货币网，单位 %），返回 [(trade_date, value)]。
+
+    start/end: 'YYYYMMDD'。按年分块拉取——接口长区间遇无数据月份时
+    akshare 内部解析缺 frValueMap 键直接报错。"""
+    y_start, y_end = int(start_date[:4]), int(end_date[:4])
+    out = []
+    for y in range(y_start, y_end + 1):
+        cs = max('{}0101'.format(y), start_date)
+        ce = min('{}1231'.format(y), end_date)
+        out.extend(_fetch_dr007_range(cs, ce))
+        time.sleep(FETCH_RETRY_BACKOFF)
+    return sorted(set(out))
+
+
+def fetch_high_low_stats() -> list:
+    """拉取全 A 创新高/新低统计（乐咕，接口自带约 2 年历史）。
+
+    返回 [(trade_date, high20, low20)]；创 20 日新高/新低家数。"""
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        try:
+            df = ak.stock_a_high_low_statistics(symbol='all')
+            if df is None or df.empty:
+                raise ValueError('接口返回空数据')
+            out = []
+            for _, r in df.iterrows():
+                d = str(r['date'])[:10]
+                hi = pd.to_numeric(r['high20'], errors='coerce')
+                lo = pd.to_numeric(r['low20'], errors='coerce')
+                if d and pd.notna(hi) and pd.notna(lo):
+                    out.append((d, int(hi), int(lo)))
+            return sorted(out)
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                time.sleep(FETCH_RETRY_BACKOFF * attempt)
+    raise RuntimeError(
+        '拉取新高/新低统计失败（重试 {} 次）: {}'.format(FETCH_MAX_RETRY, last_err))
+
+
+def fetch_and_store_env(conn) -> dict:
+    """抓取并入库市场环境指标。返回 {indicator: 新增行数}。
+
+    - us10y          10Y 美债收益率%（幂等）
+    - dr007          DR007 定盘利率%（30 自然日滚动窗口 upsert，防接口漏日；
+                     空表从 DR007_START 回填）
+    - high20 / low20 全 A 创 20 日新高/新低家数（接口自带约 2 年）
+    - turnover       两市成交额亿元（沪深综指 kline 成交额加总；同步回填
+      index_daily 的 volume/amount 列，扩列后旧行 NULL 一并补齐）
+    全部仅保留 ENV_RETAIN_YEARS 窗口内数据（与 purge 同口径）；
+    INSERT OR IGNORE，重复运行"新增 0 行"即就绪。"""
+    stats = {}
+    today = date.today()
+    cutoff = env_cutoff_date()
+
+    # 1) 10Y 美债
+    us = {d: v for d, v in fetch_us10y().items() if d >= cutoff}
+    stats['us10y'] = swdb.upsert_env_rows(conn, 'us10y', sorted(us.items()))
+    time.sleep(FETCH_RETRY_BACKOFF)
+
+    # 2) DR007：近 30 自然日窗口 + 空表全量（窗口过滤后再入库）
+    row = conn.execute(
+        'SELECT MAX(trade_date) FROM env_daily WHERE indicator = ?',
+        ('dr007',)).fetchone()
+    if not row[0]:
+        start = DR007_START
+    else:
+        start = (datetime.strptime(row[0], '%Y-%m-%d') - timedelta(days=30)).strftime('%Y%m%d')
+    dr = [t for t in fetch_dr007(start, today.strftime('%Y%m%d')) if t[0] >= cutoff]
+    stats['dr007'] = swdb.upsert_env_rows(conn, 'dr007', dr)
+    time.sleep(FETCH_RETRY_BACKOFF)
+
+    # 3) 创 20 日新高/新低家数
+    hl = [t for t in fetch_high_low_stats() if t[0] >= cutoff]
+    stats['high20'] = swdb.upsert_env_rows(conn, 'high20', [(d, h) for d, h, _l in hl])
+    stats['low20'] = swdb.upsert_env_rows(conn, 'low20', [(d, l) for d, _h, l in hl])
+    time.sleep(FETCH_RETRY_BACKOFF)
+
+    # 4) 指数量额：历史不完整则从窗口下限全量回填（UPSERT 幂等），
+    #    扩列后旧行 amount 为 NULL 时从最早 NULL 日期补齐，否则日常增量
+    for symbol, name in TURNOVER_INDEXES:
+        earliest, latest = conn.execute(
+            'SELECT MIN(trade_date), MAX(trade_date) FROM index_daily WHERE code = ?',
+            (symbol,)).fetchone()
+        missing = conn.execute(
+            'SELECT MIN(trade_date) FROM index_daily WHERE code = ? AND amount IS NULL',
+            (symbol,)).fetchone()[0]
+        end = today.strftime('%Y-%m-%d')
+        if earliest is None or earliest > cutoff:
+            beg = cutoff
+        elif missing:
+            beg = max(missing, cutoff)
+        elif latest:
+            beg = (datetime.strptime(latest, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+        else:
+            continue
+        if beg > end:
+            stats.setdefault('_{}_skipped'.format(symbol), 0)
+            continue
+        rows = fetch_index_daily_full(symbol, beg, end)
+        stats['index_{}'.format(symbol)] = swdb.upsert_index_daily(conn, symbol, name, rows)
+        time.sleep(FETCH_RETRY_BACKOFF)
+
+    # 5) 两市成交额（亿元）：沪深综指同日 amount 加总，SQL 合成，幂等
+    cur = conn.execute("""
+        INSERT OR IGNORE INTO env_daily (indicator, trade_date, value)
+        SELECT 'turnover', a.trade_date, ROUND((a.amount + b.amount) / 1e8, 2)
+        FROM index_daily a
+        JOIN index_daily b ON b.code = ? AND b.trade_date = a.trade_date
+        WHERE a.code = ? AND a.amount IS NOT NULL AND b.amount IS NOT NULL
+        """, (TURNOVER_INDEXES[1][0], TURNOVER_INDEXES[0][0]))
+    conn.commit()
+    stats['turnover'] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    return stats

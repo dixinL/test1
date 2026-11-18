@@ -29,6 +29,28 @@ COMBINED_DIR = os.path.join(HUB_DIR, 'report')
 TREND_SUMMARY_PREFIX = 'sw_trend_summary_'
 DAILY_REPORT_PREFIX = 'action_report_'
 
+# 市场环境仪表盘（sw2-market-env 读库现算，辅助层）：
+# 模块缺失/查询异常/库内无数据时优雅省略，不阻断 combined 生成。
+# append 而非 insert(0)：避免本目录与 analysis-hub/daily-report 的同名模块遮蔽
+_ENV_DIR = os.path.join(REPO_DIR, 'sw2-market-env')
+if _ENV_DIR not in sys.path:
+    sys.path.append(_ENV_DIR)
+try:
+    import env_report as _env_report
+except Exception:
+    _env_report = None
+
+
+def _safe_env_lines(as_of_date):
+    """环境指标紧凑两行（市场环境 / 广度与主线）。异常或无数据返回 None。"""
+    if _env_report is None:
+        return None
+    try:
+        _base, lines = _env_report.build_env_lines(as_of_date)
+        return lines
+    except Exception:
+        return None
+
 TOP_N_UP = 30
 TOP_N_DOWN = 20
 
@@ -637,6 +659,10 @@ def build_outlook(daily_state, trend, rec_res=None, daily_date=None, trend_date=
     erp_line = (daily_state or {}).get('erp')
     if erp_line:
         out.append('- ERP 估值环境：{}'.format(erp_line))
+    # 市场环境仪表盘：利率/量能/波动/广度/主线（sw2-market-env 读库现算，辅助层）
+    env_lines = _safe_env_lines(today_str)
+    if env_lines:
+        out.extend(env_lines)
     out.append('### 综合建议')
     out.append('- 综合判断：{}。'.format(overall_txt))
     if o_line:
