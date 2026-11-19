@@ -1,5 +1,7 @@
-pandas
-akshare
-requests
-Pillow
-openpyxl
+pandas==2.3.3
+numpy==2.5.2
+akshare==1.18.94  # 锁版本：1.20.41+ 批量改名接口（bond_zh_us_rate 等），升级前需同步改 swfetch.py 接口名
+requests==2.34.2
+certifi==2026.7.22
+Pillow==12.3.0
+openpyxl==3.1.5
