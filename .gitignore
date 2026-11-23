@@ -2,3 +2,6 @@
 __pycache__/
 *.py[cod]
 .pycache/
+
+# 刷新失败标记（CI 补跑用的工作区状态，不入库）
+.refresh_failed

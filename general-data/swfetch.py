@@ -226,34 +226,63 @@ def fetch_and_store_congestion(conn, days_back: int = 30, level: int = 2) -> int
 
 INDEX_KLINE_URL = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
 
+# — 东财 push2his 风控应对 —
+# 数据中心 IP（CI/Azure 段）会概率性触发风控断连（RemoteDisconnected）；
+# 同域名同指纹重试无效，必须换域名 + 浏览器指纹 + 分钟级退避跨过风控窗口。
+EM_KLINE_HOSTS = (
+    'push2his.eastmoney.com',
+    '1.push2his.eastmoney.com',
+    '38.push2his.eastmoney.com',
+)
+EM_RETRY_BACKOFF = (10.0, 30.0, 60.0)
+_em_headers = {
+    'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                   'AppleWebKit/537.36 (KHTML, like Gecko) '
+                   'Chrome/126.0.0.0 Safari/537.36'),
+    'Accept': '*/*',
+    'Referer': 'https://quote.eastmoney.com/',
+}
+
+
+def _em_kline_request(params: dict) -> list:
+    """东财 kline 接口请求：每次重试轮换域名 + 分钟级退避。
+
+    返回 klines 字符串列表；全部失败抛最后一次异常（由调用方包装文案）。"""
+    last_err = None
+    for attempt in range(1, FETCH_MAX_RETRY + 1):
+        host = EM_KLINE_HOSTS[(attempt - 1) % len(EM_KLINE_HOSTS)]
+        try:
+            r = requests.get(
+                'https://{}/api/qt/stock/kline/get'.format(host),
+                params=params, headers=_em_headers, timeout=15)
+            r.raise_for_status()
+            return (r.json().get('data') or {}).get('klines') or []
+        except Exception as err:
+            last_err = err
+            if attempt < FETCH_MAX_RETRY:
+                backoff = EM_RETRY_BACKOFF[min(attempt - 1, len(EM_RETRY_BACKOFF) - 1)]
+                time.sleep(backoff)
+    raise last_err if last_err else RuntimeError('东财 kline 请求失败')
+
 
 def fetch_index_daily(symbol: str, beg: str, end: str) -> list:
     """拉取大盘指数日线收盘（东方财富 kline 接口），返回 [(trade_date, close)] 升序。
 
     symbol: 'sh000001'=上证指数 / 'sz399001'=深证成指；beg/end: 'YYYY-MM-DD'。"""
     secid = ('1.' if symbol.startswith('sh') else '0.') + symbol[2:]
-    last_err = None
-    for attempt in range(1, FETCH_MAX_RETRY + 1):
-        try:
-            r = requests.get(
-                INDEX_KLINE_URL,
-                params={'secid': secid, 'klt': '101', 'fqt': '1',
-                        'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
-                        'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53'},
-                timeout=15)
-            r.raise_for_status()
-            klines = (r.json().get('data') or {}).get('klines') or []
-            out = []
-            for k in klines:
-                d, v = k.split(',')[:2]
-                out.append((d, float(v)))
-            return out
-        except Exception as err:
-            last_err = err
-            if attempt < FETCH_MAX_RETRY:
-                time.sleep(FETCH_RETRY_BACKOFF * attempt)
-    raise RuntimeError(
-        f'拉取指数 {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {last_err}')
+    try:
+        klines = _em_kline_request(
+            {'secid': secid, 'klt': '101', 'fqt': '1',
+             'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
+             'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53'})
+    except Exception as err:
+        raise RuntimeError(
+            f'拉取指数 {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {err}') from err
+    out = []
+    for k in klines:
+        d, v = k.split(',')[:2]
+        out.append((d, float(v)))
+    return out
 
 
 def fetch_and_store_index(conn, symbol: str, name: str,
@@ -422,31 +451,22 @@ def fetch_index_daily_full(symbol: str, beg: str, end: str) -> list:
 
     返回 [(trade_date, close, volume, amount)]；volume 单位手、amount 单位元。"""
     secid = ('1.' if symbol.startswith('sh') else '0.') + symbol[2:]
-    last_err = None
-    for attempt in range(1, FETCH_MAX_RETRY + 1):
-        try:
-            r = requests.get(
-                INDEX_KLINE_URL,
-                params={'secid': secid, 'klt': '101', 'fqt': '1',
-                        'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
-                        'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53,f56,f57'},
-                timeout=15)
-            r.raise_for_status()
-            klines = (r.json().get('data') or {}).get('klines') or []
-            out = []
-            for k in klines:
-                parts = k.split(',')
-                if len(parts) < 4:
-                    continue
-                out.append((parts[0], float(parts[1]),
-                            float(parts[2] or 0), float(parts[3] or 0)))
-            return out
-        except Exception as err:
-            last_err = err
-            if attempt < FETCH_MAX_RETRY:
-                time.sleep(FETCH_RETRY_BACKOFF * attempt)
-    raise RuntimeError(
-        f'拉取指数(全字段) {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {last_err}')
+    try:
+        klines = _em_kline_request(
+            {'secid': secid, 'klt': '101', 'fqt': '1',
+             'beg': beg.replace('-', ''), 'end': end.replace('-', ''),
+             'fields1': 'f1,f2,f3,f4,f5', 'fields2': 'f51,f53,f56,f57'})
+    except Exception as err:
+        raise RuntimeError(
+            f'拉取指数(全字段) {symbol} 失败（重试 {FETCH_MAX_RETRY} 次）: {err}') from err
+    out = []
+    for k in klines:
+        parts = k.split(',')
+        if len(parts) < 4:
+            continue
+        out.append((parts[0], float(parts[1]),
+                    float(parts[2] or 0), float(parts[3] or 0)))
+    return out
 
 
 def fetch_us10y() -> dict:

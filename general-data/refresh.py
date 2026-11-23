@@ -12,6 +12,7 @@ erp / env_daily）的增量刷新集中在一个入口，供 run.py 第 0 步调
     python refresh.py --valuation-since 20260101  # 估值区间回填起点 (YYYYMMDD)
     python refresh.py --purge        # 清除 5 年滚动窗口外行情并 VACUUM
     python refresh.py --stats        # 只打印各表覆盖情况，不刷新
+    python refresh.py --retry-failed # 只补跑上次失败的段（读 .refresh_failed 标记，CI 兜底）
 
 写入全部幂等：price 只补新日期；width/congestion/valuation/env_daily 主键冲突
 原样保留；重复运行"新增 0 行"即代表已就绪。
@@ -19,6 +20,7 @@ erp / env_daily）的增量刷新集中在一个入口，供 run.py 第 0 步调
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -30,6 +32,57 @@ import swfetch
 DEFAULT_INDEX = ('sh000001', '上证指数')
 
 RETAIN_YEARS = 5                   # 滚动保留窗口（--purge 清除窗口外行情）
+
+# 刷新失败标记文件：记录失败的段名（每行一个），供 --retry-failed 跨风控窗口补跑。
+# 触发场景：东财 push2 对数据中心 IP 概率性断连（RemoteDisconnected），
+# 脚本内秒级重试无效；CI workflow 检测到标记后 sleep 数分钟再补跑。
+FAILED_MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             '.refresh_failed')
+
+
+def _mark_failed(section: str, err) -> None:
+    """把失败段追加进标记文件（去重），供 workflow 检测与 --retry-failed 补跑。"""
+    existing = set()
+    if os.path.isfile(FAILED_MARKER):
+        with open(FAILED_MARKER, encoding='utf-8-sig') as f:
+            existing = {ln.strip() for ln in f if ln.strip()}
+    existing.add(section)
+    with open(FAILED_MARKER, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(sorted(existing)))
+    print('[refresh] [MARK] {} 刷新失败，已写标记待补跑: {}'.format(section, err))
+
+
+def retry_failed(conn) -> int:
+    """补跑标记文件中的失败段；成功段从标记剔除，仍失败段保留待下次补跑。
+
+    全部成功清标记并退出 0；仍有失败也退出 0（仅告警，靠次日运行自愈）。"""
+    if not os.path.isfile(FAILED_MARKER):
+        print('[refresh] 无失败标记，无需补跑')
+        return 0
+    with open(FAILED_MARKER, encoding='utf-8-sig') as f:
+        sections = [ln.strip().lstrip('\ufeff') for ln in f if ln.strip()]
+    print('[refresh] 补跑失败段: {}'.format(', '.join(sections)))
+    remaining = set(sections)
+    for s in sections:
+        fn = RETRY_SECTIONS.get(s)
+        if fn is None:
+            remaining.discard(s)
+            continue
+        try:
+            fn(conn)
+            remaining.discard(s)
+            print('[refresh] [OK] {} 补跑成功'.format(s))
+        except Exception as e:
+            print('[refresh] [WARN] {} 补跑仍失败: {}'.format(s, e))
+    if remaining:
+        with open(FAILED_MARKER, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(sorted(remaining)))
+        print('[refresh] [WARN] 仍有失败段: {}，标记保留待下次补跑'.format(
+            ', '.join(sorted(remaining))))
+    else:
+        os.remove(FAILED_MARKER)
+        print('[refresh] 全部补跑成功，标记已清除')
+    return 0
 
 
 def refresh_industries(conn) -> int:
@@ -192,6 +245,17 @@ def refresh_env(conn) -> dict:
     return stats
 
 
+# 可补跑的段（在全部段函数定义之后声明，引用函数对象）
+RETRY_SECTIONS = {
+    'index': refresh_index,
+    'erp': refresh_erp,
+    'env': refresh_env,
+    'width': lambda conn: refresh_width(conn, 40),
+    'congestion': lambda conn: refresh_congestion(conn, 40),
+    'valuation': lambda conn: refresh_valuation(conn),
+}
+
+
 def purge_old_data(conn, today: date) -> int:
     """清除滚动窗口（RETAIN_YEARS 年）外的行情数据并 VACUUM 瘦身。
 
@@ -253,6 +317,8 @@ def main() -> int:
                         help='跳过 ERP 估值环境刷新（沪深300 PE + 10Y 国债）')
     parser.add_argument('--no-env', action='store_true',
                         help='跳过市场环境指标刷新（利率/量能/波动/广度/主线）')
+    parser.add_argument('--retry-failed', action='store_true',
+                        help='只补跑上次刷新失败的段（读 .refresh_failed 标记），供 CI 兜底')
     parser.add_argument('--days-back', type=int, default=40,
                         help='乐咕宽度/拥挤度回看自然日数（默认 40）')
     parser.add_argument('--valuation-since', type=str, default=None,
@@ -272,6 +338,11 @@ def main() -> int:
         conn.close()
         return rc
 
+    if args.retry_failed:
+        rc = retry_failed(conn)
+        conn.close()
+        return rc
+
     n_industry = refresh_industries(conn)
     industries = [
         {'sw_code': r['sw_code'], 'sw_name': r['sw_name']}
@@ -288,34 +359,40 @@ def main() -> int:
     try:
         refresh_width(conn, args.days_back)
     except Exception as e:
+        _mark_failed('width', e)
         print('[refresh] [WARN] width 刷新失败: {}'.format(e))
 
     try:
         refresh_congestion(conn, args.days_back)
     except Exception as e:
+        _mark_failed('congestion', e)
         print('[refresh] [WARN] congestion 刷新失败: {}'.format(e))
 
     try:
         refresh_index(conn)
     except Exception as e:
+        _mark_failed('index', e)
         print('[refresh] [WARN] index 刷新失败: {}'.format(e))
 
     if not args.no_erp:
         try:
             refresh_erp(conn)
         except Exception as e:
+            _mark_failed('erp', e)
             print('[refresh] [WARN] erp 刷新失败: {}'.format(e))
 
     if not args.no_env:
         try:
             refresh_env(conn)
         except Exception as e:
+            _mark_failed('env', e)
             print('[refresh] [WARN] env 刷新失败: {}'.format(e))
 
     if not args.no_valuation:
         try:
             refresh_valuation(conn, since=args.valuation_since)
         except Exception as e:
+            _mark_failed('valuation', e)
             print('[refresh] [WARN] valuation 刷新失败: {}'.format(e))
 
     if args.purge:

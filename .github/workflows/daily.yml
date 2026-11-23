@@ -46,6 +46,18 @@ jobs:
           if [ "$(date +%-m)" = "5" ] && [ "$(date +%-d)" = "1" ]; then export REFRESH_PURGE=1; fi
           python run.py daily --notify
 
+      - name: 刷新失败补跑（跨东财风控窗口兜底）
+        working-directory: general-data
+        run: |
+          if [ -f .refresh_failed ]; then
+            echo "[retry] 检测到刷新失败标记: $(tr '\n' ' ' < .refresh_failed)"
+            echo "[retry] 等待 240s 跨过风控窗口后补跑..."
+            sleep 240
+            python refresh.py --retry-failed
+          else
+            echo "[retry] 无失败标记，跳过补跑"
+          fi
+
       - name: 提交生成的文件
         run: |
           git config user.name "github-actions[bot]"
